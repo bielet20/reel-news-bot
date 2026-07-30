@@ -2,6 +2,9 @@
 .env
 *.env
 
+# Articulos de prueba locales (no son parte del codigo)
+articulo_*.txt
+
 # Salidas generadas
 output/
 
