@@ -1,0 +1,25 @@
+# Entorno y secretos
+.env
+*.env
+
+# Salidas generadas
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Temporales de yt-dlp / moviepy
+_ytsrc_*
+_tmp_*
+_mus_audio_*
+
+# macOS
+.DS_Store

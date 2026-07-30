@@ -1,0 +1,17 @@
+anthropic
+python-dotenv
+feedparser
+requests
+beautifulsoup4
+edge-tts
+gTTS
+moviepy==1.0.3
+imageio==2.31.1
+imageio-ffmpeg
+pillow
+numpy
+opencv-python
+youtube-transcript-api
+yt-dlp
+# Opcional: para transcribir videos locales con --video (requiere ffmpeg)
+# openai-whisper
