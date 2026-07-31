@@ -13,5 +13,15 @@ numpy
 opencv-python
 youtube-transcript-api
 yt-dlp
+# API server
+fastapi
+uvicorn[standard]
+python-multipart
+# Hotspots / library
+qrcode[pil]
+# Music library
+mutagen
+# TTS opcional
+elevenlabs
 # Opcional: para transcribir videos locales con --video (requiere ffmpeg)
 # openai-whisper

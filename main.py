@@ -58,6 +58,8 @@ from trending_finder import buscar_trending_youtube, buscar_trending_noticias
 from video_clipper import generar_reel_desde_clip, generar_multiples_reels_desde_clip
 from video_extractor import transcribir_video_local
 from music_analyzer import EXTS_VIDEO as _EXTS_VIDEO, EXTS_AUDIO as _EXTS_AUDIO
+from image_pipeline import preparar_imagenes
+from avatar_generator import generar_avatar, estado as avatar_estado
 
 CARPETA_SALIDA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
@@ -71,7 +73,18 @@ def _slug(texto: str, max_len: int = 60) -> str:
 
 def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SALIDA,
                       duracion_maxima: int = 60, texto_articulo: str = None,
-                      tipo: str = "articulo") -> str:
+                      tipo: str = "articulo", imagenes: list = None,
+                      generar_imagenes_ai: bool = False,
+                      servicio_ai: str = "pollinations",
+                      ruta_avatar_img: str = None,
+                      servicio_avatar: str = "auto",
+                      servicio_voz: str = "auto",
+                      voz: str = None,
+                      marca: str = None,
+                      mostrar_titulo: bool = True,
+                      musica_fondo: str = None,
+                      volumen_musica: float = 0.3,
+                      volumen_voz: float = 1.0) -> str:
     """
     Toma una noticia (dict con titulo/link/fuente/resumen) y genera el reel
     completo. Devuelve la ruta del mp4 generado.
@@ -110,19 +123,68 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
         f.write(guion["guion"])
 
     print("-> Generando audio narrado...")
-    ruta_audio = generar_audio(guion["guion"], ruta_audio)
+    ruta_audio = generar_audio(guion["guion"], ruta_audio, servicio=servicio_voz, voz=voz)
     dur = duracion_audio(ruta_audio)
     print(f"   Audio generado: {ruta_audio} ({dur:.1f}s)")
 
+    # Pipeline de imágenes
+    import tempfile
+    carpeta_imgs = tempfile.mkdtemp(prefix="_imgs_")
+    imgs_fondo = preparar_imagenes(
+        titulo=noticia["titulo"],
+        url_articulo=noticia.get("link") if not noticia.get("link", "").startswith("/") else None,
+        rutas_usuario=imagenes or [],
+        generar_ai=generar_imagenes_ai,
+        n_ai=3,
+        servicio_ai=servicio_ai,
+        carpeta_tmp=carpeta_imgs,
+    )
+
+    # Avatar hablando (lip sync)
+    ruta_avatar_video = None
+    if ruta_avatar_img and os.path.isfile(ruta_avatar_img):
+        ruta_avatar_video = os.path.join(carpeta_imgs, "avatar_talking.mp4")
+        print("-> Generando avatar hablando (lip sync)...")
+        ruta_avatar_video = generar_avatar(
+            ruta_imagen=ruta_avatar_img,
+            ruta_audio=ruta_audio,
+            ruta_salida=ruta_avatar_video,
+            servicio=servicio_avatar,
+        )
+        if ruta_avatar_video:
+            print(f"   Avatar generado: {ruta_avatar_video}")
+        else:
+            print("   [WARN] No se pudo generar avatar, continuando sin él.")
+
     print("-> Generando video vertical...")
-    construir_video(guion, ruta_audio, ruta_video, tema=tema, duracion_maxima=duracion_maxima)
+    construir_video(guion, ruta_audio, ruta_video, tema=tema, duracion_maxima=duracion_maxima,
+                    imagenes=imgs_fondo if imgs_fondo else None,
+                    ruta_avatar=ruta_avatar_video,
+                    marca=marca,
+                    mostrar_titulo=mostrar_titulo,
+                    musica_fondo=musica_fondo,
+                    volumen_musica=volumen_musica,
+                    volumen_voz=volumen_voz)
     print(f"   Video generado: {ruta_video}")
+
+    # Limpiar imágenes temporales
+    import shutil
+    try:
+        shutil.rmtree(carpeta_imgs, ignore_errors=True)
+    except Exception:
+        pass
 
     return ruta_video
 
 
 def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_SALIDA,
-                  duracion_maxima: int = 60) -> str:
+                  duracion_maxima: int = 60, imagenes: list = None,
+                  generar_imagenes_ai: bool = False, servicio_ai: str = "pollinations",
+                  ruta_avatar_img: str = None, servicio_avatar: str = "auto",
+                  servicio_voz: str = "auto", voz: str = None,
+                  marca: str = None, mostrar_titulo: bool = True,
+                  musica_fondo: str = None, volumen_musica: float = 0.3,
+                  volumen_voz: float = 1.0) -> str:
     """
     Version de procesar_noticia() para cuando el usuario pega un link de
     articulo directamente (no viene de una busqueda por RSS). Descarga la
@@ -159,7 +221,19 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
     print(f"   Titulo detectado: {noticia['titulo']}  (fuente: {noticia['fuente']})")
     return procesar_noticia(noticia, tema, carpeta_salida=carpeta_salida,
                              duracion_maxima=duracion_maxima,
-                             texto_articulo=articulo["texto"])
+                             texto_articulo=articulo["texto"],
+                             imagenes=imagenes,
+                             generar_imagenes_ai=generar_imagenes_ai,
+                             servicio_ai=servicio_ai,
+                             ruta_avatar_img=ruta_avatar_img,
+                             servicio_avatar=servicio_avatar,
+                             servicio_voz=servicio_voz,
+                             voz=voz,
+                             marca=marca,
+                             mostrar_titulo=mostrar_titulo,
+                             musica_fondo=musica_fondo,
+                             volumen_musica=volumen_musica,
+                             volumen_voz=volumen_voz)
 
 
 def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
@@ -462,7 +536,13 @@ def leer_articulo_desde_archivo(ruta: str) -> dict:
 
 
 def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CARPETA_SALIDA,
-                      duracion_maxima: int = 60) -> str:
+                      duracion_maxima: int = 60, imagenes: list = None,
+                      generar_imagenes_ai: bool = False, servicio_ai: str = "pollinations",
+                      ruta_avatar_img: str = None, servicio_avatar: str = "auto",
+                      servicio_voz: str = "auto", voz: str = None,
+                      marca: str = None, mostrar_titulo: bool = True,
+                      musica_fondo: str = None, volumen_musica: float = 0.3,
+                      volumen_voz: float = 1.0) -> str:
     """Genera el reel a partir de un articulo pegado manualmente en un .txt."""
     print(f"\n=== Procesando archivo: {ruta} ===")
     articulo = leer_articulo_desde_archivo(ruta)
@@ -476,7 +556,19 @@ def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CAR
     }
     return procesar_noticia(noticia, tema, carpeta_salida=carpeta_salida,
                              duracion_maxima=duracion_maxima,
-                             texto_articulo=articulo["texto"])
+                             texto_articulo=articulo["texto"],
+                             imagenes=imagenes,
+                             generar_imagenes_ai=generar_imagenes_ai,
+                             servicio_ai=servicio_ai,
+                             ruta_avatar_img=ruta_avatar_img,
+                             servicio_avatar=servicio_avatar,
+                             servicio_voz=servicio_voz,
+                             voz=voz,
+                             marca=marca,
+                             mostrar_titulo=mostrar_titulo,
+                             musica_fondo=musica_fondo,
+                             volumen_musica=volumen_musica,
+                             volumen_voz=volumen_voz)
 
 
 def main():
@@ -536,6 +628,45 @@ def main():
     parser.add_argument("--whisper-idioma", default="es",
                         help="Idioma para Whisper (default: es). Usa 'auto' para "
                              "deteccion automatica.")
+    # --- Imágenes de fondo ---
+    parser.add_argument("--imagen", action="append", default=None, metavar="RUTA",
+                        help="Ruta a una imagen para usar como fondo del video. "
+                             "Se puede repetir para hacer un slideshow.")
+    parser.add_argument("--generar-imagenes-ai", action="store_true",
+                        help="Genera imágenes de fondo con IA (Pollinations.ai, gratis).")
+    parser.add_argument("--servicio-ai", default="pollinations",
+                        choices=["pollinations", "pexels"],
+                        help="Servicio de IA para generar imágenes (default: pollinations).")
+    # --- Avatar hablando (lip sync) ---
+    parser.add_argument("--avatar", default=None, metavar="RUTA_IMAGEN",
+                        help="Ruta a una foto del avatar (cara) para animar con lip sync. "
+                             "Requiere SadTalker instalado (bash setup_sadtalker.sh) o DID_API_KEY.")
+    parser.add_argument("--avatar-servicio", default="auto",
+                        choices=["auto", "sadtalker", "did"],
+                        help="Servicio de lip sync: 'auto' (D-ID si hay key, si no SadTalker), "
+                             "'sadtalker' (local), 'did' (cloud, requiere DID_API_KEY).")
+    # --- Voz TTS ---
+    parser.add_argument("--servicio-voz", default="auto",
+                        choices=["auto", "elevenlabs", "edge-tts"],
+                        help="Motor TTS: 'auto' (ElevenLabs si hay key, si no edge-tts), "
+                             "'elevenlabs' (premium, requiere ELEVENLABS_API_KEY), 'edge-tts' (gratis).")
+    parser.add_argument("--voz", default=None,
+                        help="Nombre de voz para edge-tts (ej: es-ES-AlvaroNeural) o "
+                             "voice_id de ElevenLabs.")
+    parser.add_argument("--sin-titulo", action="store_true",
+                        help="No muestra el título en el video (solo en el nombre del archivo)")
+    parser.add_argument("--musica-fondo", default=None, metavar="RUTA",
+                        help="Ruta a un archivo de música (MP3, WAV, etc.) para mezclar como "
+                             "fondo del reel. El audio narrado suena encima de la música.")
+    parser.add_argument("--volumen-musica", type=float, default=0.3, metavar="0.0-1.0",
+                        help="Volumen de la música de fondo (0.0=silencio, 1.0=máximo). "
+                             "Por defecto: 0.3")
+    parser.add_argument("--volumen-voz", type=float, default=1.0, metavar="0.0-1.0",
+                        help="Volumen de la voz narrada (0.0=silencio, 1.0=máximo). "
+                             "Por defecto: 1.0")
+    parser.add_argument("--marca", default=None, metavar="TEXTO",
+                        help="Texto de marca/watermark en el video (ej: '@micanal'). "
+                             "Si no se indica, no aparece ninguna marca.")
     parser.add_argument("--trending-yt", action="store_true",
                         help="Busca los videos en tendencia en YouTube y genera reels a "
                              "partir de sus transcripciones.")
@@ -579,7 +710,19 @@ def main():
     if args.url or args.archivo:
         for link in (args.url or []):
             try:
-                ruta = procesar_url(link, tema="default", duracion_maxima=args.duracion_maxima)
+                ruta = procesar_url(link, tema="default", duracion_maxima=args.duracion_maxima,
+                                    imagenes=args.imagen,
+                                    generar_imagenes_ai=args.generar_imagenes_ai,
+                                    servicio_ai=args.servicio_ai,
+                                    ruta_avatar_img=args.avatar,
+                                    servicio_avatar=args.avatar_servicio,
+                                    servicio_voz=args.servicio_voz,
+                                    voz=args.voz,
+                                    marca=args.marca,
+                                    mostrar_titulo=not args.sin_titulo,
+                                    musica_fondo=args.musica_fondo,
+                                    volumen_musica=args.volumen_musica,
+                                    volumen_voz=args.volumen_voz)
                 generados.append(ruta)
             except Exception:
                 print(f"[ERROR] Fallo al procesar el link '{link}':")
@@ -588,7 +731,19 @@ def main():
         for ruta_archivo in (args.archivo or []):
             try:
                 ruta = procesar_archivo(ruta_archivo, tema="default",
-                                        duracion_maxima=args.duracion_maxima)
+                                        duracion_maxima=args.duracion_maxima,
+                                        imagenes=args.imagen,
+                                        generar_imagenes_ai=args.generar_imagenes_ai,
+                                        servicio_ai=args.servicio_ai,
+                                        ruta_avatar_img=args.avatar,
+                                        servicio_avatar=args.avatar_servicio,
+                                        servicio_voz=args.servicio_voz,
+                                        voz=args.voz,
+                                        marca=args.marca,
+                                        mostrar_titulo=not args.sin_titulo,
+                                        musica_fondo=args.musica_fondo,
+                                        volumen_musica=args.volumen_musica,
+                                        volumen_voz=args.volumen_voz)
                 generados.append(ruta)
             except Exception:
                 print(f"[ERROR] Fallo al procesar el archivo '{ruta_archivo}':")

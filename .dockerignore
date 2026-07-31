@@ -1,0 +1,34 @@
+# Secretos y entorno (se pasan con --env-file en compose)
+.env
+*.env
+
+# Código del frontend (servicio separado)
+web/
+
+# Venv del host (en Docker se usa /opt/sadtalker_venv)
+vendor/sadtalker/venv/
+vendor/sadtalker/checkpoints/
+
+# Caché y artefactos generados
+__pycache__/
+*.py[cod]
+*.pyo
+output/
+_uploads/
+_library/
+_music/
+_templates/
+_img_cache/
+_ytsrc_*
+_tmp_*
+_mus_audio_*
+_job_*.log
+
+# macOS y Git
+.DS_Store
+.git/
+.gitignore
+
+# Archivos de artículos locales (no código)
+articulo_*.txt
+jtx_jito.txt

@@ -23,7 +23,8 @@ import numpy as np
 import requests
 from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import (
-    ImageClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips, vfx
+    ImageClip, AudioFileClip, VideoFileClip,
+    CompositeVideoClip, concatenate_videoclips, vfx
 )
 
 ANCHO, ALTO = 1080, 1920
@@ -365,26 +366,149 @@ def _partir_si_es_larga(frase: str, max_palabras: int = 14):
 def _dividir_en_frases(guion: dict):
     """Usa hook / puntos / cierre como 'frases' independientes para sincronizar,
     partiendo las que sean demasiado largas para que cada subtitulo quepa bien
-    en pantalla."""
-    frases_base = [guion["hook"]] + list(guion["puntos"]) + [guion["cierre"]]
+    en pantalla. Si los campos estructurados están vacíos (IA devolvió solo
+    guion["guion"]), parte el texto completo en oraciones."""
+    frases_base = [guion.get("hook", "")] + list(guion.get("puntos", [])) + [guion.get("cierre", "")]
     frases = []
     for f in frases_base:
         if f.strip():
             frases.extend(_partir_si_es_larga(f))
+
+    if not frases and guion.get("guion"):
+        import re
+        # Remove surrounding quotes (Claude sometimes wraps paragraphs in quotes)
+        texto = re.sub(r'^["\']|["\']$', '', guion["guion"].strip())
+        texto = re.sub(r'"\s*\n\s*"', ' ', texto)  # join "para1"\n"para2"
+        oraciones = re.split(r'(?<=[.!?])\s+', texto)
+        for o in oraciones:
+            o = o.strip().strip('"').strip("'")
+            if o:
+                frases.extend(_partir_si_es_larga(o))
+
     return frases
+
+
+def _clip_avatar(ruta_video: str, duracion_total: float,
+                  tam: int = 380, y_pos: int = None) -> "CompositeVideoClip | None":
+    """
+    Carga el video del avatar (SadTalker/D-ID), lo recorta en círculo
+    y lo posiciona en la parte inferior del frame.
+    """
+    if not ruta_video or not os.path.isfile(ruta_video):
+        return None
+    try:
+        clip = VideoFileClip(ruta_video, audio=False)
+
+        # Loopear si el avatar es más corto que el video
+        if clip.duration < duracion_total:
+            n = int(duracion_total / clip.duration) + 1
+            clip = concatenate_videoclips([clip] * n).subclip(0, duracion_total)
+        else:
+            clip = clip.subclip(0, duracion_total)
+
+        # Recortar al cuadrado y redimensionar
+        w, h = clip.size
+        lado = min(w, h)
+        clip = clip.crop(x1=(w - lado) // 2, y1=(h - lado) // 2,
+                         x2=(w + lado) // 2, y2=(h + lado) // 2)
+        clip = clip.resize((tam, tam))
+
+        # Máscara circular
+        mascara = np.zeros((tam, tam), dtype=float)
+        cy, cx = tam // 2, tam // 2
+        r = tam // 2 - 4
+        yy, xx = np.ogrid[:tam, :tam]
+        mascara[(xx - cx) ** 2 + (yy - cy) ** 2 <= r ** 2] = 1.0
+        mask_clip = ImageClip(mascara, ismask=True).set_duration(duracion_total)
+        clip = clip.set_mask(mask_clip)
+
+        # Borde blanco alrededor del círculo
+        borde_tam = tam + 8
+        borde_arr = np.zeros((borde_tam, borde_tam, 4), dtype=np.uint8)
+        br = borde_tam // 2 - 1
+        byy, bxx = np.ogrid[:borde_tam, :borde_tam]
+        circulo = (bxx - borde_tam // 2) ** 2 + (byy - borde_tam // 2) ** 2 <= br ** 2
+        borde_arr[circulo] = [255, 255, 255, 80]
+        borde_clip = (ImageClip(borde_arr, ismask=False)
+                      .set_duration(duracion_total)
+                      .set_position(((ANCHO - borde_tam) // 2,
+                                     (y_pos or (ALTO - tam - 100)) - 4)))
+
+        x = (ANCHO - tam) // 2
+        y = y_pos if y_pos is not None else ALTO - tam - 100
+        clip = clip.set_position((x, y))
+
+        return [borde_clip, clip]
+    except Exception as e:
+        print(f"[WARN] No se pudo cargar avatar: {e}")
+        return None
+
+
+def _crear_fondo_clip_desde_imagenes(rutas: list, duracion_total: float):
+    """Slideshow con Ken Burns: cada imagen ocupa duracion_total/n segundos."""
+    from moviepy.editor import concatenate_videoclips
+    dur_por_img = duracion_total / len(rutas)
+    clips = []
+    for ruta in rutas:
+        try:
+            img = Image.open(ruta).convert("RGB")
+            # Recortar/redimensionar al tamaño del video
+            escala = max(ANCHO / img.width, ALTO / img.height)
+            nuevo = (int(img.width * escala) + 1, int(img.height * escala) + 1)
+            img = img.resize(nuevo, Image.LANCZOS)
+            x0 = (img.width - ANCHO) // 2
+            y0 = (img.height - ALTO) // 2
+            img = img.crop((x0, y0, x0 + ANCHO, y0 + ALTO))
+            clip = (
+                ImageClip(np.array(img))
+                .set_duration(dur_por_img)
+                .fx(vfx.resize, lambda t, d=dur_por_img: 1 + 0.06 * (t / max(d, 0.01)))
+                .set_position("center")
+            )
+            clips.append(clip)
+        except Exception as e:
+            print(f"[WARN] No se pudo cargar imagen {ruta}: {e}")
+    if not clips:
+        return None
+    return concatenate_videoclips(clips, method="compose")
 
 
 def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
                      tema: str = "default", duracion_maxima: int = 60,
-                     preset: str = "medium", fps: int = 30) -> str:
+                     preset: str = "medium", fps: int = 30,
+                     imagenes: list = None,
+                     ruta_avatar: str = None,
+                     marca: str = None,
+                     mostrar_titulo: bool = True,
+                     musica_fondo: str = None,
+                     volumen_musica: float = 0.3,
+                     volumen_voz: float = 1.0) -> str:
     """
     Genera el mp4 final. guion viene de summarizer.generar_guion_reel().
     ruta_audio es el mp3/wav generado por tts.generar_audio().
+    imagenes: lista de rutas de imágenes locales para usar como fondo (slideshow).
+              Si es None o vacía, usa el fondo procedural/Pexels.
     """
     audio_clip = AudioFileClip(ruta_audio)
     duracion_audio = min(audio_clip.duration, duracion_maxima)
     if audio_clip.duration > duracion_maxima:
         audio_clip = audio_clip.subclip(0, duracion_maxima)
+
+    # Mezcla con música de fondo si se proporcionó
+    if musica_fondo and os.path.isfile(musica_fondo):
+        try:
+            import moviepy.audio.fx.all as afx
+            from moviepy.editor import CompositeAudioClip
+            music = AudioFileClip(musica_fondo)
+            if music.duration < duracion_audio:
+                music = afx.audio_loop(music, duration=duracion_audio)
+            else:
+                music = music.subclip(0, duracion_audio)
+            voz = audio_clip.volumex(volumen_voz)
+            musica = music.volumex(volumen_musica)
+            audio_clip = CompositeAudioClip([voz, musica])
+        except Exception as e:
+            print(f"[WARN] No se pudo añadir música de fondo: {e}")
 
     frases = _dividir_en_frases(guion)
     palabras_por_frase = [max(len(f.split()), 1) for f in frases]
@@ -398,13 +522,17 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
         tiempos.append((t, dur))
         t += dur
 
-    fondo_img = _crear_fondo(tema)
-    fondo_clip = ImageClip(np.array(fondo_img)).set_duration(duracion_audio)
-    # Efecto "Ken Burns": zoom lento y continuo para que el fondo no se sienta
-    # estatico (moviepy recorta automaticamente lo que sobra del canvas fijo).
-    fondo_clip = fondo_clip.fx(
-        vfx.resize, lambda t: 1 + 0.06 * (t / max(duracion_audio, 0.01))
-    ).set_position("center")
+    # Fondo: imágenes proporcionadas → slideshow, si no → degradado/Pexels
+    fondo_clip = None
+    if imagenes:
+        fondo_clip = _crear_fondo_clip_desde_imagenes(imagenes, duracion_audio)
+
+    if fondo_clip is None:
+        fondo_img = _crear_fondo(tema)
+        fondo_clip = ImageClip(np.array(fondo_img)).set_duration(duracion_audio)
+        fondo_clip = fondo_clip.fx(
+            vfx.resize, lambda t: 1 + 0.06 * (t / max(duracion_audio, 0.01))
+        ).set_position("center")
 
     # titulo fijo arriba
     titulo_img = _frame_texto(
@@ -416,21 +544,37 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
         .set_start(0)
     )
 
-    # Subtitulos animados palabra por palabra (karaoke), sincronizados con el
-    # tiempo estimado de cada frase.
-    clips_subtitulos = _clips_subtitulos_karaoke(frases, tiempos, FONT_BOLD)
+    # Avatar hablando (opcional)
+    avatar_clips = []
+    y_subtitulos = ALTO // 2  # posición default de subtítulos (centro)
+    TAM_AVATAR = 380
 
-    marca_img = _frame_texto(
-        "Reel generado automaticamente", FONT_REGULAR, 32,
-        y_centro=ALTO - 90, max_ancho=900, con_fondo=False,
-        color_texto=(255, 255, 255, 160),
+    if ruta_avatar:
+        y_avatar = ALTO - TAM_AVATAR - 80  # zona inferior
+        clips_resultado = _clip_avatar(ruta_avatar, duracion_audio, tam=TAM_AVATAR, y_pos=y_avatar)
+        if clips_resultado:
+            avatar_clips = clips_resultado
+            # Subir subtítulos para que no se sobrepongan al avatar
+            y_subtitulos = ALTO - TAM_AVATAR - 200
+
+    # Subtitulos animados palabra por palabra (karaoke)
+    clips_subtitulos = _clips_subtitulos_karaoke(
+        frases, tiempos, FONT_BOLD, y_centro=y_subtitulos
     )
-    marca_clip = ImageClip(np.array(marca_img)).set_duration(duracion_audio)
 
-    video_final = CompositeVideoClip(
-        [fondo_clip, titulo_clip] + clips_subtitulos + [marca_clip],
-        size=(ANCHO, ALTO),
-    ).set_audio(audio_clip)
+    if marca:
+        marca_img = _frame_texto(
+            marca, FONT_REGULAR, 32,
+            y_centro=ALTO - 40 if not ruta_avatar else y_avatar - 20,
+            max_ancho=900, con_fondo=False,
+            color_texto=(255, 255, 255, 130),
+        )
+        marca_clip = [ImageClip(np.array(marca_img)).set_duration(duracion_audio)]
+    else:
+        marca_clip = []
+
+    capas = [fondo_clip] + ([titulo_clip] if mostrar_titulo else []) + clips_subtitulos + avatar_clips + marca_clip
+    video_final = CompositeVideoClip(capas, size=(ANCHO, ALTO)).set_audio(audio_clip)
 
     video_final = video_final.set_duration(duracion_audio)
 

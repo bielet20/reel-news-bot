@@ -1,0 +1,57 @@
+services:
+
+  # ── Backend FastAPI ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Código fuente montado para hot-reload sin rebuild
+      - .:/app
+      # Checkpoints de SadTalker (~1.5 GB, montar desde host)
+      - ./vendor/sadtalker/checkpoints:/app/vendor/sadtalker/checkpoints
+      # Datos persistentes
+      - ./output:/app/output
+      - ./_library:/app/_library
+      - ./_music:/app/_music
+      - ./_templates:/app/_templates
+      - ./_uploads:/app/_uploads
+      - ./assets:/app/assets
+    env_file:
+      - .env
+    environment:
+      # Apunta al venv CUDA construido en la imagen (fuera de /app)
+      - SADTALKER_VENV=/opt/sadtalker_venv
+    restart: unless-stopped
+    # Acceso a la GPU NVIDIA (requiere NVIDIA Container Toolkit)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ── Frontend Next.js ───────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      # Código fuente para hot-reload
+      - ./web:/app
+      # node_modules construidos en Linux (no usar los del host Mac/Win)
+      - frontend_modules:/app/node_modules
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  # node_modules de Linux (independiente del SO del host)
+  frontend_modules:

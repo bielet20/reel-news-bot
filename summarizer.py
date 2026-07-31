@@ -347,7 +347,18 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
 
     tipo: "video" para transcripciones de YouTube, "articulo" para noticias.
     """
-    fuente_texto = texto_completo if len(texto_completo.split()) > 30 else titulo
+    palabras_texto = len(texto_completo.split())
+    palabras_titulo = len(titulo.split())
+
+    # Rechazar si no hay contenido real sobre el que escribir
+    if palabras_texto < 30 and palabras_titulo < 10:
+        raise ValueError(
+            f"Contenido insuficiente para generar un reel "
+            f"({palabras_texto} palabras). "
+            f"Proporciona al menos el texto del artículo o una descripción detallada."
+        )
+
+    fuente_texto = texto_completo if palabras_texto > 30 else titulo
 
     limite_chars = 40000 if tipo == "video" else 4000
     extracto = fuente_texto[:limite_chars]
@@ -357,16 +368,27 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
     else:
         prompt = _prompt_articulo(titulo, fuente, extracto, max_palabras_total)
 
+    def _validar_guion(texto: str) -> str:
+        """Lanza ValueError si la IA indicó que el contenido es insuficiente."""
+        if "CONTENIDO_INSUFICIENTE" in texto.upper():
+            raise ValueError(
+                "El contenido proporcionado es insuficiente para generar un reel. "
+                "Añade más texto descriptivo sobre el tema."
+            )
+        return texto
+
     # --- Intentar Ollama (local, sin coste) ---
     ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
     try:
         print(f"   -> Usando Ollama ({ollama_model}, local)...")
-        guion_texto = _llamar_ollama(prompt, ollama_model)
+        guion_texto = _validar_guion(_llamar_ollama(prompt, ollama_model))
         guion_texto = _recortar_a_palabras(guion_texto, max_palabras_total)
         n = len(guion_texto.split())
         return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                 "cierre": "", "guion": guion_texto, "palabras": n,
                 "duracion_estimada_seg": round(n / 2.5, 1)}
+    except ValueError:
+        raise
     except Exception as e:
         print(f"[WARN] Ollama no disponible: {e}")
 
@@ -376,12 +398,14 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
         try:
             import anthropic  # noqa: F401
             print(f"   -> Usando Claude ({os.environ.get('CLAUDE_MODEL', 'claude-sonnet-5')})...")
-            guion_texto = _llamar_claude(prompt, claude_key)
+            guion_texto = _validar_guion(_llamar_claude(prompt, claude_key))
             guion_texto = _recortar_a_palabras(guion_texto, max_palabras_total)
             n = len(guion_texto.split())
             return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                     "cierre": "", "guion": guion_texto, "palabras": n,
                     "duracion_estimada_seg": round(n / 2.5, 1)}
+        except ValueError:
+            raise
         except ImportError:
             print("[WARN] Paquete 'anthropic' no instalado.")
         except Exception as e:
@@ -392,12 +416,14 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
     if gemini_key:
         try:
             print("   -> Usando Gemini 2.0 Flash (gratuito)...")
-            guion_texto = _llamar_gemini(prompt, gemini_key)
+            guion_texto = _validar_guion(_llamar_gemini(prompt, gemini_key))
             guion_texto = _recortar_a_palabras(guion_texto, max_palabras_total)
             n = len(guion_texto.split())
             return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                     "cierre": "", "guion": guion_texto, "palabras": n,
                     "duracion_estimada_seg": round(n / 2.5, 1)}
+        except ValueError:
+            raise
         except Exception as e:
             print(f"[WARN] Gemini API: {e}")
 
@@ -406,12 +432,14 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
     if groq_key:
         try:
             print("   -> Usando Groq Llama 3.3 70B (gratuito)...")
-            guion_texto = _llamar_groq(prompt, groq_key)
+            guion_texto = _validar_guion(_llamar_groq(prompt, groq_key))
             guion_texto = _recortar_a_palabras(guion_texto, max_palabras_total)
             n = len(guion_texto.split())
             return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                     "cierre": "", "guion": guion_texto, "palabras": n,
                     "duracion_estimada_seg": round(n / 2.5, 1)}
+        except ValueError:
+            raise
         except Exception as e:
             print(f"[WARN] Groq API: {e}")
 
@@ -453,6 +481,9 @@ def _prompt_articulo(titulo: str, fuente: str, texto: str, max_palabras: int) ->
         f"1. HOOK: pregunta o dato impactante que enganche en los primeros 3 segundos\n"
         f"2. PUNTOS CLAVE: 2-3 datos mas importantes de la noticia\n"
         f"3. CIERRE: llamada a la accion breve\n\n"
+        f"IMPORTANTE: usa UNICAMENTE informacion presente en el texto proporcionado. "
+        f"NO inventes datos, hechos, cifras ni detalles que no aparezcan en el contenido. "
+        f"Si el contenido es insuficiente para generar un guion util, responde exactamente: CONTENIDO_INSUFICIENTE\n\n"
         f"Tono: dinamico, conversacional, directo. "
         f"Devuelve SOLO el texto del guion, sin ningun encabezado ni explicacion."
     )

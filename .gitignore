@@ -4,9 +4,18 @@
 
 # Articulos de prueba locales (no son parte del codigo)
 articulo_*.txt
+jtx_jito.txt
+
+# Logs de jobs
+_job_*.log
 
 # Salidas generadas
 output/
+
+# Datos de usuario (biblioteca, música, plantillas, uploads)
+_library/
+_music/
+_templates/
 
 # Python
 __pycache__/
@@ -23,6 +32,15 @@ build/
 _ytsrc_*
 _tmp_*
 _mus_audio_*
+
+# Imágenes temporales y uploads
+_img_cache/
+_uploads/
+_imgs_*/
+
+# SadTalker: modelos (~1.5 GB) y entorno virtual
+vendor/sadtalker/checkpoints/
+vendor/sadtalker/venv/
 
 # macOS
 .DS_Store
