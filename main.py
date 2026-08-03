@@ -81,10 +81,11 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                       servicio_voz: str = "auto",
                       voz: str = None,
                       marca: str = None,
-                      mostrar_titulo: bool = True,
+                      mostrar_titulo: bool = False,
                       musica_fondo: str = None,
                       volumen_musica: float = 0.3,
-                      volumen_voz: float = 1.0) -> str:
+                      volumen_voz: float = 1.0,
+                      texto_personalizado: str = None) -> str:
     """
     Toma una noticia (dict con titulo/link/fuente/resumen) y genera el reel
     completo. Devuelve la ruta del mp4 generado.
@@ -164,7 +165,8 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                     mostrar_titulo=mostrar_titulo,
                     musica_fondo=musica_fondo,
                     volumen_musica=volumen_musica,
-                    volumen_voz=volumen_voz)
+                    volumen_voz=volumen_voz,
+                    texto_personalizado=texto_personalizado)
     print(f"   Video generado: {ruta_video}")
 
     # Limpiar imágenes temporales
@@ -182,9 +184,9 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
                   generar_imagenes_ai: bool = False, servicio_ai: str = "pollinations",
                   ruta_avatar_img: str = None, servicio_avatar: str = "auto",
                   servicio_voz: str = "auto", voz: str = None,
-                  marca: str = None, mostrar_titulo: bool = True,
+                  marca: str = None, mostrar_titulo: bool = False,
                   musica_fondo: str = None, volumen_musica: float = 0.3,
-                  volumen_voz: float = 1.0) -> str:
+                  volumen_voz: float = 1.0, texto_personalizado: str = None) -> str:
     """
     Version de procesar_noticia() para cuando el usuario pega un link de
     articulo directamente (no viene de una busqueda por RSS). Descarga la
@@ -233,7 +235,8 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
                              mostrar_titulo=mostrar_titulo,
                              musica_fondo=musica_fondo,
                              volumen_musica=volumen_musica,
-                             volumen_voz=volumen_voz)
+                             volumen_voz=volumen_voz,
+                             texto_personalizado=texto_personalizado)
 
 
 def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
@@ -540,9 +543,9 @@ def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CAR
                       generar_imagenes_ai: bool = False, servicio_ai: str = "pollinations",
                       ruta_avatar_img: str = None, servicio_avatar: str = "auto",
                       servicio_voz: str = "auto", voz: str = None,
-                      marca: str = None, mostrar_titulo: bool = True,
+                      marca: str = None, mostrar_titulo: bool = False,
                       musica_fondo: str = None, volumen_musica: float = 0.3,
-                      volumen_voz: float = 1.0) -> str:
+                      volumen_voz: float = 1.0, texto_personalizado: str = None) -> str:
     """Genera el reel a partir de un articulo pegado manualmente en un .txt."""
     print(f"\n=== Procesando archivo: {ruta} ===")
     articulo = leer_articulo_desde_archivo(ruta)
@@ -568,7 +571,8 @@ def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CAR
                              mostrar_titulo=mostrar_titulo,
                              musica_fondo=musica_fondo,
                              volumen_musica=volumen_musica,
-                             volumen_voz=volumen_voz)
+                             volumen_voz=volumen_voz,
+                             texto_personalizado=texto_personalizado)
 
 
 def main():
@@ -667,6 +671,9 @@ def main():
     parser.add_argument("--marca", default=None, metavar="TEXTO",
                         help="Texto de marca/watermark en el video (ej: '@micanal'). "
                              "Si no se indica, no aparece ninguna marca.")
+    parser.add_argument("--texto-personalizado", default=None, metavar="TEXTO",
+                        help="Texto adicional que aparece en el video (ej: nombre de canción, "
+                             "fuente, subtítulo libre). Solo se muestra si se indica.")
     parser.add_argument("--trending-yt", action="store_true",
                         help="Busca los videos en tendencia en YouTube y genera reels a "
                              "partir de sus transcripciones.")
@@ -722,7 +729,8 @@ def main():
                                     mostrar_titulo=not args.sin_titulo,
                                     musica_fondo=args.musica_fondo,
                                     volumen_musica=args.volumen_musica,
-                                    volumen_voz=args.volumen_voz)
+                                    volumen_voz=args.volumen_voz,
+                                    texto_personalizado=args.texto_personalizado)
                 generados.append(ruta)
             except Exception:
                 print(f"[ERROR] Fallo al procesar el link '{link}':")
@@ -743,7 +751,8 @@ def main():
                                         mostrar_titulo=not args.sin_titulo,
                                         musica_fondo=args.musica_fondo,
                                         volumen_musica=args.volumen_musica,
-                                        volumen_voz=args.volumen_voz)
+                                        volumen_voz=args.volumen_voz,
+                                        texto_personalizado=args.texto_personalizado)
                 generados.append(ruta)
             except Exception:
                 print(f"[ERROR] Fallo al procesar el archivo '{ruta_archivo}':")

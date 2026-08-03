@@ -479,10 +479,11 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
                      imagenes: list = None,
                      ruta_avatar: str = None,
                      marca: str = None,
-                     mostrar_titulo: bool = True,
+                     mostrar_titulo: bool = False,
                      musica_fondo: str = None,
                      volumen_musica: float = 0.3,
-                     volumen_voz: float = 1.0) -> str:
+                     volumen_voz: float = 1.0,
+                     texto_personalizado: str = None) -> str:
     """
     Genera el mp4 final. guion viene de summarizer.generar_guion_reel().
     ruta_audio es el mp3/wav generado por tts.generar_audio().
@@ -562,6 +563,18 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
         frases, tiempos, FONT_BOLD, y_centro=y_subtitulos
     )
 
+    # Texto personalizado (nombre canción, fuente, subtítulo libre…)
+    if texto_personalizado:
+        y_texto_pers = ALTO - 180 if not ruta_avatar else y_avatar - 80
+        texto_pers_img = _frame_texto(
+            texto_personalizado, FONT_REGULAR, 42,
+            y_centro=y_texto_pers, max_ancho=920,
+            color_texto=(255, 255, 255, 220),
+        )
+        texto_pers_clips = [ImageClip(np.array(texto_pers_img)).set_duration(duracion_audio)]
+    else:
+        texto_pers_clips = []
+
     if marca:
         marca_img = _frame_texto(
             marca, FONT_REGULAR, 32,
@@ -573,7 +586,14 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
     else:
         marca_clip = []
 
-    capas = [fondo_clip] + ([titulo_clip] if mostrar_titulo else []) + clips_subtitulos + avatar_clips + marca_clip
+    capas = (
+        [fondo_clip]
+        + ([titulo_clip] if mostrar_titulo else [])
+        + clips_subtitulos
+        + avatar_clips
+        + texto_pers_clips
+        + marca_clip
+    )
     video_final = CompositeVideoClip(capas, size=(ANCHO, ALTO)).set_audio(audio_clip)
 
     video_final = video_final.set_duration(duracion_audio)

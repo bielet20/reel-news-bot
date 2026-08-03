@@ -39,10 +39,20 @@ const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }>
   failed:    { label: "Error",        color: "var(--error)",    bg: "#2a0a0a" },
 };
 
+// ── Item de resumen para el modal de confirmación ─────────────────────────────
+interface SummaryItem {
+  label: string;
+  value?: string;
+  active: boolean;
+  always?: boolean; // siempre incluido, sin toggle
+}
+interface SummaryGroup { title: string; items: SummaryItem[] }
+
 export default function Home() {
   const [mode, setMode] = useState<Mode>("descubrir");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const [url, setUrl] = useState("");
   const [titulo, setTitulo] = useState("");
@@ -54,7 +64,9 @@ export default function Home() {
   const [cantidad, setCantidad] = useState(1);
   const [duracion, setDuracion] = useState(60);
   const [marca, setMarca] = useState("");
-  const [mostrarTitulo, setMostrarTitulo] = useState(true);
+  const [mostrarTitulo, setMostrarTitulo] = useState(false);
+  const [textoPersonalizadoEnabled, setTextoPersonalizadoEnabled] = useState(false);
+  const [textoPersonalizado, setTextoPersonalizado] = useState("");
   const [imgConfig, setImgConfig] = useState<ImageConfig>({
     mode: "none", uploadedPaths: [], generateAi: false, servicioAi: "pollinations",
   });
@@ -68,8 +80,8 @@ export default function Home() {
   // Música de fondo
   const [musicaEnabled, setMusicaEnabled] = useState(false);
   const [musicaItem, setMusicaItem] = useState<MusicItem | null>(null);
-  const [volumenMusica, setVolumenMusica] = useState(30);  // 0-100
-  const [volumenVoz, setVolumenVoz] = useState(100);       // 0-100
+  const [volumenMusica, setVolumenMusica] = useState(30);
+  const [volumenVoz, setVolumenVoz] = useState(100);
   const [showMusicPicker, setShowMusicPicker] = useState(false);
   const [musicLibrary, setMusicLibrary] = useState<MusicItem[]>([]);
   const [previewingAudio, setPreviewingAudio] = useState(false);
@@ -81,7 +93,6 @@ export default function Home() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
 
-  // Poll job status while running/pending
   useEffect(() => {
     if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -98,17 +109,100 @@ export default function Home() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [activeJob?.id, activeJob?.status]);
 
-  // Auto-scroll logs
   useEffect(() => {
     if (logRef.current && logsExpanded) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [activeJob?.logs, logsExpanded]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // Construye el resumen para el modal de confirmación
+  function buildSummary(): SummaryGroup[] {
+    const modeInfo = MODES.find((m) => m.id === mode);
+
+    const fuenteLabel =
+      mode === "url" ? (url || "—") :
+      mode === "texto" ? (titulo || "—") :
+      mode === "youtube" ? (url || "—") :
+      mode === "musica" ? (url || "—") :
+      mode === "tema" ? (tema || "—") : "—";
+
+    const voiceLabel =
+      voiceConfig.servicio === "auto" ? "Automático (edge-tts / ElevenLabs)" :
+      voiceConfig.servicio === "edge-tts" ? `edge-tts${voiceConfig.voz ? ` · ${voiceConfig.voz}` : ""}` :
+      `ElevenLabs${voiceConfig.voz ? ` · ${voiceConfig.voz}` : ""}`;
+
+    const fondoLabel =
+      imgConfig.mode === "upload" ? `${imgConfig.uploadedPaths.length} imagen(es) subida(s)` :
+      imgConfig.mode === "ai" ? `Generadas con IA (${imgConfig.servicioAi})` :
+      "Degradado procedural (sin imágenes)";
+
+    return [
+      {
+        title: "Fuente de contenido",
+        items: [
+          { label: modeInfo?.label ?? mode, value: fuenteLabel, active: true, always: true },
+          ...(mode === "youtube" ? [
+            { label: "Modo YouTube", value: modoYt === "clip" ? "Clip (video real)" : "Narrado (voz sintética)", active: true, always: true },
+            { label: "Cantidad", value: `${cantidad} short(s)`, active: true, always: true },
+          ] : []),
+          ...(mode === "musica" && artista ? [{ label: "Artista", value: artista, active: true }] : []),
+          { label: "Duración máxima", value: `${duracion}s`, active: true, always: true },
+        ],
+      },
+      ...(mode !== "youtube" && mode !== "musica" ? [{
+        title: "Audio",
+        items: [
+          { label: "Narración", value: voiceLabel, active: true, always: true },
+          {
+            label: "Música de fondo",
+            value: musicaEnabled && musicaItem
+              ? `${musicaItem.name}  (voz ${volumenVoz}% · música ${volumenMusica}%)`
+              : undefined,
+            active: musicaEnabled && !!musicaItem,
+          },
+        ],
+      }] : []),
+      {
+        title: "Fondo visual",
+        items: [
+          { label: "Imágenes de fondo", value: fondoLabel, active: true, always: imgConfig.mode === "none" },
+          ...(avatarConfig.enabled && avatarConfig.imagePath ? [{
+            label: "Avatar hablando",
+            value: avatarConfig.servicio === "auto" ? "Auto (D-ID / SadTalker)" :
+                   avatarConfig.servicio === "sadtalker" ? "SadTalker (local)" : "D-ID (cloud)",
+            active: true,
+          }] : [{ label: "Avatar hablando", active: false }]),
+        ],
+      },
+      {
+        title: "Texto en el video",
+        items: [
+          { label: "Subtítulos karaoke", value: "Incluidos siempre", active: true, always: true },
+          {
+            label: "Título del artículo",
+            value: mostrarTitulo ? (titulo || "título del artículo") : undefined,
+            active: mostrarTitulo,
+          },
+          {
+            label: "Texto personalizado",
+            value: textoPersonalizadoEnabled && textoPersonalizado.trim()
+              ? textoPersonalizado.trim() : undefined,
+            active: textoPersonalizadoEnabled && !!textoPersonalizado.trim(),
+          },
+          {
+            label: "Marca de agua",
+            value: marca.trim() || undefined,
+            active: !!marca.trim(),
+          },
+        ],
+      },
+    ];
+  }
+
+  async function doGenerate() {
     setError("");
     setSubmitting(true);
+    setShowConfirm(false);
     setActiveJob(null);
 
     const body: Record<string, unknown> = { mode, duracion_maxima: duracion };
@@ -131,6 +225,8 @@ export default function Home() {
     if (voiceConfig.voz) body.voz = voiceConfig.voz;
     if (marca.trim()) body.marca = marca.trim();
     body.mostrar_titulo = mostrarTitulo;
+    if (textoPersonalizadoEnabled && textoPersonalizado.trim())
+      body.texto_personalizado = textoPersonalizado.trim();
 
     if (musicaEnabled && musicaItem) {
       body.musica_fondo = musicaItem.filename;
@@ -155,19 +251,22 @@ export default function Home() {
     }
   }
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setShowConfirm(true);
+  }
+
   const isRunning = activeJob && (activeJob.status === "pending" || activeJob.status === "running");
 
   function handleUsarNoticia(noticia: { titulo: string; titulo_original: string; fuente: string; link: string; resumen: string }) {
-    // Strip HTML from resumen (RSS often includes <a> tags)
     const textoLimpio = noticia.resumen
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-
     setMode("texto");
     setTitulo(noticia.titulo);
     setFuente(noticia.fuente || "");
-    // Use summary as base text; user can enrich it
     setTexto(textoLimpio || noticia.titulo_original);
     setError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -188,7 +287,6 @@ export default function Home() {
       audioCtxRef.current = ctx;
       const sources: AudioBufferSourceNode[] = [];
 
-      // Load and play TTS preview
       const voiceRes = await fetch("/api/tts/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -207,7 +305,6 @@ export default function Home() {
         sources.push(voiceSrc);
       }
 
-      // Load and play music if selected
       if (musicaEnabled && musicaItem) {
         const musicRes = await fetch(`/music-files/${musicaItem.filename}`);
         if (musicRes.ok) {
@@ -224,7 +321,6 @@ export default function Home() {
       }
 
       audioSourcesRef.current = sources;
-      // Auto-stop after 20s max
       setTimeout(() => stopPreview(), 20000);
     } catch (err) {
       console.error("Preview error:", err);
@@ -276,7 +372,6 @@ export default function Home() {
             {MODES.find((m) => m.id === mode)?.desc}
           </p>
 
-          {/* Discover mode */}
           {mode === "descubrir" && (
             <DiscoverPanel onUsar={handleUsarNoticia} />
           )}
@@ -301,7 +396,7 @@ export default function Home() {
                 {titulo && texto && (
                   <div className="text-xs px-3 py-2 rounded-lg"
                     style={{ background: "#0a1a2a", border: "1px solid #1a3a5a", color: "#60a5fa" }}>
-                    ✓ Noticia cargada desde Descubrir. Puedes editar el texto o añadir más contenido del artículo original antes de generar.
+                    ✓ Noticia cargada desde Descubrir. Puedes editar el texto o añadir más contenido antes de generar.
                   </div>
                 )}
                 <Field label="Título del artículo">
@@ -374,14 +469,8 @@ export default function Home() {
             {(mode === "url" || mode === "texto" || mode === "tema") && (
               <Field label="Música de fondo">
                 <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
-                  {/* Toggle */}
                   <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: musicaEnabled ? 12 : 0 }}>
-                    <div
-                      onClick={() => setMusicaEnabled(!musicaEnabled)}
-                      style={{ width: 40, height: 22, borderRadius: 11, background: musicaEnabled ? "var(--accent)" : "var(--surface2)", border: "1px solid var(--border)", position: "relative", transition: "background 0.2s", flexShrink: 0, cursor: "pointer" }}
-                    >
-                      <div style={{ position: "absolute", top: 3, left: musicaEnabled ? 20 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
-                    </div>
+                    <Toggle value={musicaEnabled} onChange={setMusicaEnabled} />
                     <span style={{ fontSize: 13, color: "var(--muted)" }}>
                       {musicaEnabled ? "Música de fondo activada" : "Añadir música de fondo"}
                     </span>
@@ -392,7 +481,6 @@ export default function Home() {
 
                   {musicaEnabled && (
                     <>
-                      {/* Music picker */}
                       <div style={{ marginBottom: 10 }}>
                         {musicaItem ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--surface)", borderRadius: 8, padding: "7px 10px" }}>
@@ -404,13 +492,12 @@ export default function Home() {
                             <button onClick={() => { setShowMusicPicker(true); loadMusicLibrary(); }} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--muted)", cursor: "pointer", fontSize: 11, padding: "3px 8px" }}>Cambiar</button>
                           </div>
                         ) : (
-                          <button onClick={() => { setShowMusicPicker(true); loadMusicLibrary(); }} style={{ width: "100%", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 8, padding: "10px 0", fontSize: 12, color: "var(--accent)", cursor: "pointer" }}>
+                          <button type="button" onClick={() => { setShowMusicPicker(true); loadMusicLibrary(); }} style={{ width: "100%", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 8, padding: "10px 0", fontSize: 12, color: "var(--accent)", cursor: "pointer" }}>
                             🎵 Elegir pista de la biblioteca
                           </button>
                         )}
                       </div>
 
-                      {/* Volume sliders */}
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                         <div>
                           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
@@ -428,7 +515,6 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {/* Preview + library link */}
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                         <button
                           type="button"
@@ -490,36 +576,43 @@ export default function Home() {
               </Field>
             )}
 
-            <Field label="Marca en el video (opcional)">
+            {/* ── Texto visible en el video ─────────────────────────────── */}
+            <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>Texto en el video</p>
+
+              {/* Título del artículo */}
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 8 }}>
+                <Toggle value={mostrarTitulo} onChange={setMostrarTitulo} />
+                <span style={{ fontSize: 13, color: mostrarTitulo ? "var(--text)" : "var(--muted)" }}>
+                  {mostrarTitulo ? "Título del artículo visible" : "Sin título"}
+                </span>
+              </label>
+
+              {/* Texto personalizado */}
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: textoPersonalizadoEnabled ? 6 : 0 }}>
+                <Toggle value={textoPersonalizadoEnabled} onChange={setTextoPersonalizadoEnabled} />
+                <span style={{ fontSize: 13, color: textoPersonalizadoEnabled ? "var(--text)" : "var(--muted)" }}>
+                  {textoPersonalizadoEnabled ? "Texto personalizado activado" : "Añadir texto personalizado"}
+                </span>
+              </label>
+              {textoPersonalizadoEnabled && (
+                <input
+                  type="text"
+                  value={textoPersonalizado}
+                  onChange={(e) => setTextoPersonalizado(e.target.value)}
+                  placeholder="ej: nombre de la canción, fuente, subtítulo libre…"
+                  style={{ width: "100%", marginTop: 6, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 10px", fontSize: 13, color: "var(--text)", outline: "none", boxSizing: "border-box" }}
+                />
+              )}
+            </div>
+
+            {/* Marca de agua */}
+            <Field label="Marca de agua (opcional)">
               <TextInput
                 value={marca}
                 onChange={setMarca}
                 placeholder="ej: @micanal — vacío = sin marca"
               />
-            </Field>
-
-            <Field label="Título en el video">
-              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                <div
-                  onClick={() => setMostrarTitulo(!mostrarTitulo)}
-                  style={{
-                    width: 40, height: 22, borderRadius: 11,
-                    background: mostrarTitulo ? "var(--accent)" : "var(--surface2)",
-                    border: "1px solid var(--border)",
-                    position: "relative", transition: "background 0.2s", flexShrink: 0,
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{
-                    position: "absolute", top: 3, left: mostrarTitulo ? 20 : 3,
-                    width: 14, height: 14, borderRadius: "50%",
-                    background: "#fff", transition: "left 0.2s",
-                  }} />
-                </div>
-                <span style={{ fontSize: 13, color: "var(--muted)" }}>
-                  {mostrarTitulo ? "Título visible en el video" : "Sin título en el video"}
-                </span>
-              </label>
             </Field>
 
             <Field label={`Duración máxima: ${duracion}s`}>
@@ -551,7 +644,7 @@ export default function Home() {
                 color: isRunning ? "var(--muted)" : "#fff",
               }}
             >
-              {submitting ? "Iniciando…" : isRunning ? "⟳ Generando — espera o edita y genera otro" : "✨ Generar Reel"}
+              {submitting ? "Iniciando…" : isRunning ? "⟳ Generando — espera o configura otro" : "Revisar y generar →"}
             </button>
           </form>
         </div>
@@ -569,7 +662,118 @@ export default function Home() {
 
         <RecentVideos />
       </div>
+
+      {/* Modal de confirmación */}
+      {showConfirm && (
+        <ConfirmModal
+          groups={buildSummary()}
+          onCancel={() => setShowConfirm(false)}
+          onConfirm={doGenerate}
+        />
+      )}
     </main>
+  );
+}
+
+// ── Modal de confirmación ──────────────────────────────────────────────────────
+function ConfirmModal({
+  groups, onCancel, onConfirm,
+}: {
+  groups: SummaryGroup[];
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0,
+      background: "rgba(0,0,0,0.75)",
+      zIndex: 2000,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "20px",
+    }}>
+      <div style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 18,
+        width: "100%", maxWidth: 520,
+        maxHeight: "85vh",
+        display: "flex", flexDirection: "column",
+        overflow: "hidden",
+      }}>
+        {/* Header */}
+        <div style={{ padding: "18px 20px 12px", borderBottom: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Resumen del reel</p>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 0" }}>
+            El video incluirá únicamente lo que ves activado. Confirma para generar.
+          </p>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px" }}>
+          {groups.map((group) => (
+            <div key={group.title} style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", margin: "0 0 8px" }}>
+                {group.title}
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {group.items.map((item) => (
+                  <div key={item.label} style={{
+                    display: "flex", alignItems: "baseline", gap: 8,
+                    opacity: item.active ? 1 : 0.38,
+                  }}>
+                    <span style={{
+                      fontSize: 13,
+                      color: item.active
+                        ? (item.always ? "var(--muted)" : "var(--success)")
+                        : "var(--muted)",
+                      flexShrink: 0,
+                    }}>
+                      {item.active ? (item.always ? "·" : "✓") : "—"}
+                    </span>
+                    <span style={{ fontSize: 13, color: item.active ? "var(--text)" : "var(--muted)" }}>
+                      {item.label}
+                      {item.value && (
+                        <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 12 }}>
+                          {item.value}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Actions */}
+        <div style={{
+          padding: "14px 20px",
+          borderTop: "1px solid var(--border)",
+          display: "flex", gap: 10,
+        }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 10,
+              background: "var(--surface2)", border: "1px solid var(--border)",
+              color: "var(--muted)", fontSize: 14, cursor: "pointer", fontWeight: 600,
+            }}
+          >
+            Cancelar y editar
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              flex: 2, padding: "10px 0", borderRadius: 10,
+              background: "var(--accent)", border: "none",
+              color: "#fff", fontSize: 14, cursor: "pointer", fontWeight: 700,
+            }}
+          >
+            Confirmar y generar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -586,7 +790,6 @@ function JobPanel({
 
   return (
     <div className="mt-4 rounded-2xl overflow-hidden" style={{ border: `1px solid ${st.color}40` }}>
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3"
         style={{ background: st.bg, borderBottom: `1px solid ${st.color}30` }}>
         <div className="flex items-center gap-2">
@@ -597,60 +800,34 @@ function JobPanel({
           <span className="text-xs" style={{ color: "var(--muted)" }}>#{job.id}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onToggleLogs}
-            className="text-xs px-2 py-1 rounded"
-            style={{ color: "var(--muted)", background: "var(--surface2)" }}
-          >
+          <button type="button" onClick={onToggleLogs} className="text-xs px-2 py-1 rounded"
+            style={{ color: "var(--muted)", background: "var(--surface2)" }}>
             {logsExpanded ? "Ocultar log" : "Ver log"}
           </button>
           {(job.status === "completed" || job.status === "failed") && (
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="text-xs px-2 py-1 rounded"
-              style={{ color: "var(--muted)", background: "var(--surface2)" }}
-            >
+            <button type="button" onClick={onDismiss} className="text-xs px-2 py-1 rounded"
+              style={{ color: "var(--muted)", background: "var(--surface2)" }}>
               ✕
             </button>
           )}
         </div>
       </div>
 
-      {/* Logs */}
       {logsExpanded && (
-        <pre
-          ref={logRef}
-          className="text-xs p-4 overflow-auto whitespace-pre-wrap"
-          style={{
-            background: "#050408",
-            color: "#c8c0e0",
-            maxHeight: "300px",
-            fontFamily: "ui-monospace, monospace",
-          }}
-        >
+        <pre ref={logRef} className="text-xs p-4 overflow-auto whitespace-pre-wrap"
+          style={{ background: "#050408", color: "#c8c0e0", maxHeight: "300px", fontFamily: "ui-monospace, monospace" }}>
           {job.logs || (job.status === "pending" ? "Esperando inicio…" : "Sin logs aún…")}
         </pre>
       )}
 
-      {/* Video output */}
       {job.status === "completed" && job.output_files.length > 0 && (
         <div className="p-4 space-y-3" style={{ background: "var(--surface)" }}>
           {job.output_files.map((filename) => (
             <div key={filename} className="space-y-3">
-              <video
-                src={`/videos/${filename}`}
-                controls
-                className="w-full rounded-xl"
-                style={{ background: "#000", maxHeight: "500px" }}
-              />
-              <a
-                href={`/videos/${filename}`}
-                download
-                className="block text-center text-sm py-2 rounded-lg font-medium"
-                style={{ background: "var(--accent)", color: "#fff" }}
-              >
+              <video src={`/videos/${filename}`} controls className="w-full rounded-xl"
+                style={{ background: "#000", maxHeight: "500px" }} />
+              <a href={`/videos/${filename}`} download className="block text-center text-sm py-2 rounded-lg font-medium"
+                style={{ background: "var(--accent)", color: "#fff" }}>
                 ↓ Descargar
               </a>
             </div>
@@ -658,7 +835,6 @@ function JobPanel({
         </div>
       )}
 
-      {/* Failed */}
       {job.status === "failed" && (
         <div className="px-4 py-3 space-y-2" style={{ background: "var(--surface)" }}>
           {!logsExpanded && (
@@ -672,6 +848,28 @@ function JobPanel({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Componentes pequeños ───────────────────────────────────────────────────────
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div
+      onClick={() => onChange(!value)}
+      style={{
+        width: 40, height: 22, borderRadius: 11,
+        background: value ? "var(--accent)" : "var(--surface2)",
+        border: "1px solid var(--border)",
+        position: "relative", transition: "background 0.2s",
+        flexShrink: 0, cursor: "pointer",
+      }}
+    >
+      <div style={{
+        position: "absolute", top: 3, left: value ? 20 : 3,
+        width: 14, height: 14, borderRadius: "50%",
+        background: "#fff", transition: "left 0.2s",
+      }} />
     </div>
   );
 }

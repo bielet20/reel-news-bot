@@ -88,6 +88,8 @@ class GenerateRequest(BaseModel):
     musica_fondo: Optional[str] = None   # filename en _music/
     volumen_musica: float = 0.3
     volumen_voz: float = 1.0
+    # Texto libre visible en el video (nombre canción, fuente, subtítulo…)
+    texto_personalizado: Optional[str] = None
 
 
 def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> list:
@@ -133,6 +135,8 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
             args += ["--musica-fondo", str(music_path)]
     args += ["--volumen-musica", str(req.volumen_musica)]
     args += ["--volumen-voz", str(req.volumen_voz)]
+    if req.texto_personalizado and req.texto_personalizado.strip():
+        args += ["--texto-personalizado", req.texto_personalizado.strip()]
 
     return args
 
