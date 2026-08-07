@@ -2,6 +2,7 @@
 FastAPI backend para Reel News Bot.
 Expone endpoints para lanzar jobs de generación de video y consultar su estado.
 """
+import json
 import os
 import re
 import sys
@@ -62,6 +63,7 @@ jobs_lock = threading.Lock()
 class GenerateRequest(BaseModel):
     mode: str  # url | texto | youtube | musica | tema
     url: Optional[str] = None
+    url_fuente: Optional[str] = None  # link original del artículo en modo texto (de Descubrir)
     texto: Optional[str] = None
     titulo: Optional[str] = None
     fuente: Optional[str] = None
@@ -90,6 +92,13 @@ class GenerateRequest(BaseModel):
     volumen_voz: float = 1.0
     # Texto libre visible en el video (nombre canción, fuente, subtítulo…)
     texto_personalizado: Optional[str] = None
+    # YouTube: detección automática del mejor segmento (off por defecto)
+    youtube_auto_segmento: bool = False
+    # Música: mostrar nombre de canción y artista (off por defecto)
+    musica_mostrar_nombre: bool = False
+    # Publicación en YouTube
+    tipo_contenido: str = "noticia"   # "noticia" | "curiosidad"
+    subir_youtube: bool = False
 
 
 def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> list:
@@ -104,12 +113,16 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
                  "--cantidad-shorts", str(req.cantidad_shorts)]
         if req.cookies_browser:
             args += ["--cookies-browser", req.cookies_browser]
+        if req.youtube_auto_segmento:
+            args += ["--auto-segmento-youtube"]
     elif req.mode == "musica":
         args += ["--musica", req.url]
         if req.artista:
             args += ["--artista", req.artista]
         if req.cookies_browser:
             args += ["--cookies-browser", req.cookies_browser]
+        if req.musica_mostrar_nombre:
+            args += ["--mostrar-nombre-musica"]
     elif req.mode == "tema":
         args += ["--tema", req.tema]
 
@@ -117,7 +130,9 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
     for ruta in req.imagenes_subidas:
         args += ["--imagen", ruta]
     if req.generar_imagenes_ai:
-        args += ["--generar-imagenes-ai", "--servicio-ai", req.servicio_ai]
+        args += ["--generar-imagenes-ai"]
+    if req.servicio_ai:
+        args += ["--servicio-ai", req.servicio_ai]
 
     if req.avatar_imagen:
         args += ["--avatar", req.avatar_imagen, "--avatar-servicio", req.avatar_servicio]
@@ -155,10 +170,13 @@ def _run_job(job_id: str, req: GenerateRequest):
                 f.write(f"TITULO: {req.titulo or 'Sin título'}\n")
                 if req.fuente:
                     f.write(f"FUENTE: {req.fuente}\n")
-                f.write(f"\n{req.texto}")
+                if req.url_fuente:
+                    f.write(f"LINK: {req.url_fuente}\n")
+                cuerpo = req.texto.strip() if req.texto else ""
+                f.write(f"\n{cuerpo or req.titulo or 'Sin contenido'}")
 
         cli_args = _build_cli_args(req, texto_tmp)
-        cmd = [sys.executable, str(CORE_DIR / "main.py")] + cli_args
+        cmd = [sys.executable, "-u", str(CORE_DIR / "main.py")] + cli_args
 
         with jobs_lock:
             jobs[job_id]["status"] = "running"
@@ -176,7 +194,6 @@ def _run_job(job_id: str, req: GenerateRequest):
         output_files = re.findall(r"Video generado: (.+\.mp4)", log_content, re.UNICODE)
 
         has_output = bool(output_files)
-        # Only fail if process crashed OR there were errors AND no video at all
         critical_error = (
             "raise " in log_content or
             "Error\n" in log_content or
@@ -187,12 +204,63 @@ def _run_job(job_id: str, req: GenerateRequest):
         else:
             final_status = "completed"
 
+        # Leer atribución de la fuente (si se guardó)
+        attribution = None
+        for mp4_path in output_files:
+            slug_guess = re.sub(r"_(reel|music_reel|short\d+)\.mp4$", "", Path(mp4_path).name)
+            fuente_path = OUTPUT_DIR / f"{slug_guess}_fuente.json"
+            if fuente_path.exists():
+                try:
+                    attribution = json.loads(fuente_path.read_text(encoding="utf-8"))
+                    # Leer también el caption
+                    caption_path = OUTPUT_DIR / f"{slug_guess}_caption.txt"
+                    if caption_path.exists():
+                        attribution["caption"] = caption_path.read_text(encoding="utf-8")
+                except Exception:
+                    pass
+                break
+
+        # Subida a YouTube (si está activada y el video se generó correctamente)
+        youtube_url    = None
+        youtube_status = None
+        youtube_error  = None
+
+        if final_status == "completed" and req.subir_youtube and output_files:
+            # Avisar al frontend que estamos subiendo
+            with jobs_lock:
+                jobs[job_id]["youtube_status"] = "subiendo"
+
+            try:
+                sys.path.insert(0, str(CORE_DIR))
+                from youtube_uploader import subir_video
+                titulo_yt = (
+                    (attribution.get("titulo_original") if attribution else None)
+                    or req.titulo
+                    or "Reel"
+                )
+                resultado   = subir_video(
+                    video_path  = output_files[0],
+                    titulo      = titulo_yt,
+                    tipo        = req.tipo_contenido,
+                    attribution = attribution,
+                )
+                youtube_url    = resultado["url"]
+                youtube_status = "ok"
+            except Exception as yt_e:
+                youtube_status = "error"
+                youtube_error  = str(yt_e)
+                print(f"[YouTube] Error al subir: {yt_e}")
+
         with jobs_lock:
             jobs[job_id]["logs"] = log_content
             jobs[job_id]["output_files"] = [Path(p).name for p in output_files]
+            jobs[job_id]["attribution"] = attribution
             jobs[job_id]["completed_at"] = datetime.now().isoformat()
             jobs[job_id]["status"] = final_status
             jobs[job_id]["log_file"] = None
+            jobs[job_id]["youtube_url"]    = youtube_url
+            jobs[job_id]["youtube_status"] = youtube_status
+            jobs[job_id]["youtube_error"]  = youtube_error
 
     except Exception as e:
         import traceback
@@ -231,9 +299,15 @@ def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
             "status": "pending",
             "label": labels.get(req.mode, req.mode),
             "mode": req.mode,
+            "tipo_contenido": req.tipo_contenido,
+            "subir_youtube": req.subir_youtube,
             "logs": "",
             "log_file": None,
             "output_files": [],
+            "attribution": None,
+            "youtube_url": None,
+            "youtube_status": None,
+            "youtube_error": None,
             "created_at": datetime.now().isoformat(),
             "started_at": None,
             "completed_at": None,
@@ -423,6 +497,17 @@ def tts_voices(servicio: str = "edge-tts"):
     else:
         from tts import VOCES_EDGE_ES
         return {"voices": VOCES_EDGE_ES}
+
+
+@app.get("/api/youtube/status")
+def youtube_status():
+    """Verifica si las credenciales de YouTube están configuradas y son válidas."""
+    sys.path.insert(0, str(CORE_DIR))
+    try:
+        from youtube_uploader import verificar_credenciales
+        return verificar_credenciales()
+    except Exception as e:
+        return {"ok": False, "motivo": str(e)}
 
 
 @app.post("/api/preview-image")

@@ -118,7 +118,8 @@ def _clips_cabecera(titulo: str, artista: str, duracion: float) -> list:
 def construir_reel_musical_desde_video(ruta_video: str, inicio: float, fin: float,
                                         titulo: str, artista: str,
                                         lineas_letra: list, ruta_salida: str,
-                                        preset: str = "medium", fps: int = 30) -> str:
+                                        preset: str = "medium", fps: int = 30,
+                                        mostrar_cabecera: bool = True) -> str:
     """
     Recorta [inicio, fin] del video, lo reencuadra a 9:16 con fondo
     desenfocado y superpone cabecera + letra.
@@ -137,7 +138,8 @@ def construir_reel_musical_desde_video(ruta_video: str, inicio: float, fin: floa
         frente = _construir_primer_plano(subclip).set_duration(dur)
 
         capas = [fondo, frente]
-        capas += _clips_cabecera(titulo, artista, dur)
+        if mostrar_cabecera:
+            capas += _clips_cabecera(titulo, artista, dur)
         if lineas_letra:
             capas += _clips_letra(_paginas(lineas_letra), dur)
 
@@ -160,7 +162,8 @@ def construir_reel_musical_desde_video(ruta_video: str, inicio: float, fin: floa
 def construir_reel_musical_desde_audio(ruta_audio: str, inicio: float, fin: float,
                                         titulo: str, artista: str,
                                         lineas_letra: list, ruta_salida: str,
-                                        preset: str = "medium", fps: int = 30) -> str:
+                                        preset: str = "medium", fps: int = 30,
+                                        mostrar_cabecera: bool = True) -> str:
     """
     Crea un reel estilo lyric-video sobre fondo degradado animado,
     usando el audio directo (.mp3, .wav, etc.).
@@ -181,7 +184,8 @@ def construir_reel_musical_desde_audio(ruta_audio: str, inicio: float, fin: floa
         )
 
         capas = [fondo]
-        capas += _clips_cabecera(titulo, artista, dur)
+        if mostrar_cabecera:
+            capas += _clips_cabecera(titulo, artista, dur)
 
         if lineas_letra:
             capas += _clips_letra(_paginas(lineas_letra), dur)

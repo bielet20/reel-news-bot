@@ -17,8 +17,8 @@ interface Props {
 }
 
 const MODES = [
-  { id: "none",    label: "Sin imágenes",     icon: "⬛" },
-  { id: "article", label: "Del artículo",      icon: "🌐" },
+  { id: "none",    label: "Automático",       icon: "✨" },
+  { id: "article", label: "Del artículo",     icon: "🌐" },
   { id: "upload",  label: "Subir imágenes",   icon: "📁" },
   { id: "ai",      label: "Generar con IA",   icon: "🤖" },
 ] as const;
@@ -139,8 +139,10 @@ export default function ImagePicker({ value, onChange, hasArticleUrl, tituloPara
               className="flex-1 rounded-lg px-3 py-2 text-sm"
               style={{ background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }}
             >
-              <option value="pollinations">Pollinations.ai (FLUX, gratis)</option>
-              <option value="pexels">Pexels (requiere API key)</option>
+              <option value="pollinations">Pollinations.ai — IA generativa (gratis)</option>
+              <option value="pexels">Pexels — fotos reales (PEXELS_API_KEY)</option>
+              <option value="unsplash">Unsplash — fotos reales (UNSPLASH_ACCESS_KEY)</option>
+              <option value="pixabay">Pixabay — fotos reales (PIXABAY_API_KEY)</option>
             </select>
             <button
               type="button"
@@ -174,15 +176,22 @@ export default function ImagePicker({ value, onChange, hasArticleUrl, tituloPara
           )}
 
           <p className="text-xs" style={{ color: "var(--muted)" }}>
-            Se generarán 3 imágenes relacionadas con el título del artículo usando IA.
-            Pollinations.ai es gratuito y no requiere API key.
+            Se generarán 3 imágenes con keywords extraídas del artículo.
+            En modo Pollinations no se necesita API key.
           </p>
         </div>
       )}
 
+      {value.mode === "none" && (
+        <p className="text-xs" style={{ color: "var(--muted)" }}>
+          Busca fotos reales (Pexels/Unsplash/Pixabay si hay API key) o genera con Pollinations.ai
+          usando keywords del artículo. Sin configuración adicional.
+        </p>
+      )}
+
       {value.mode === "article" && (
         <p className="text-xs" style={{ color: "var(--muted)" }}>
-          Se extraerán automáticamente las imágenes del artículo para usar como fondo.
+          Extrae las imágenes del artículo. Si no hay suficientes, busca fotos relacionadas automáticamente.
         </p>
       )}
     </div>

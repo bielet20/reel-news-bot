@@ -23,5 +23,9 @@ qrcode[pil]
 mutagen
 # TTS opcional
 elevenlabs
+# YouTube Data API (subida automática de videos)
+google-api-python-client
+google-auth
+google-auth-oauthlib
 # Opcional: para transcribir videos locales con --video (requiere ffmpeg)
 # openai-whisper

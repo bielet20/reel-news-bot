@@ -166,21 +166,146 @@ def _extraer_fuente(url: str, soup: BeautifulSoup) -> str:
     return dominio.replace("www.", "")
 
 
+def _extraer_autor(soup: BeautifulSoup) -> str:
+    """Extrae el nombre del autor desde metadatos, JSON-LD o elementos HTML."""
+    import json as _json
+
+    # 1. meta name="author"
+    meta = soup.find("meta", attrs={"name": "author"})
+    if meta and meta.get("content"):
+        return meta["content"].strip()
+
+    # 2. article:author
+    meta = soup.find("meta", property="article:author")
+    if meta and meta.get("content"):
+        val = meta["content"].strip()
+        # a veces es una URL en vez de un nombre
+        if not val.startswith("http"):
+            return val
+
+    # 3. JSON-LD
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = _json.loads(script.string or "")
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            author = data.get("author")
+            if isinstance(author, dict):
+                nombre = author.get("name", "")
+                if nombre:
+                    return nombre
+            elif isinstance(author, list) and author:
+                nombre = author[0].get("name", "") if isinstance(author[0], dict) else str(author[0])
+                if nombre:
+                    return nombre
+            elif isinstance(author, str) and author:
+                return author
+        except Exception:
+            pass
+
+    # 4. Elementos HTML con clase/atributo de autor
+    for selector in [
+        "[class*='author']", "[class*='byline']", "[rel='author']",
+        "[itemprop='author']", "[class*='firma']",
+    ]:
+        try:
+            el = soup.select_one(selector)
+            if el:
+                texto = el.get_text(" ", strip=True)
+                # Limpiar prefijos comunes ("Por ", "By ", "Autor: ")
+                texto = re.sub(r"^(por|by|autor|author)\s*:?\s*", "", texto, flags=re.IGNORECASE).strip()
+                if texto and len(texto) < 120:
+                    return texto
+        except Exception:
+            pass
+
+    return ""
+
+
+def _extraer_fecha(soup: BeautifulSoup) -> str:
+    """Extrae la fecha de publicación en formato ISO (YYYY-MM-DD o datetime)."""
+    import json as _json
+
+    # 1. article:published_time
+    meta = soup.find("meta", property="article:published_time")
+    if meta and meta.get("content"):
+        return meta["content"].strip()
+
+    # 2. datePublished en JSON-LD
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = _json.loads(script.string or "")
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            fecha = data.get("datePublished") or data.get("dateCreated")
+            if fecha:
+                return str(fecha).strip()
+        except Exception:
+            pass
+
+    # 3. Elemento <time>
+    time_el = soup.find("time")
+    if time_el:
+        dt = time_el.get("datetime") or time_el.get_text(strip=True)
+        if dt:
+            return str(dt).strip()
+
+    # 4. meta date
+    for name in ("date", "pubdate", "DC.date", "DC.Date.created"):
+        meta = soup.find("meta", attrs={"name": name})
+        if meta and meta.get("content"):
+            return meta["content"].strip()
+
+    return ""
+
+
+def _extraer_descripcion(soup: BeautifulSoup) -> str:
+    """Extrae la descripción/resumen del artículo."""
+    og = soup.find("meta", property="og:description")
+    if og and og.get("content"):
+        return og["content"].strip()
+    meta = soup.find("meta", attrs={"name": "description"})
+    if meta and meta.get("content"):
+        return meta["content"].strip()
+    return ""
+
+
+def _extraer_seccion(soup: BeautifulSoup) -> str:
+    """Extrae la sección/categoría del artículo."""
+    meta = soup.find("meta", property="article:section")
+    if meta and meta.get("content"):
+        return meta["content"].strip()
+    return ""
+
+
+def _extraer_url_autor(url: str, soup: BeautifulSoup) -> str:
+    """Extrae la URL de la página del autor si existe."""
+    link = soup.find("link", rel="author") or soup.find("a", rel="author")
+    if link and link.get("href"):
+        href = link["href"].strip()
+        if href.startswith("/"):
+            parsed = urllib.parse.urlparse(url)
+            href = f"{parsed.scheme}://{parsed.netloc}{href}"
+        return href
+    return ""
+
+
 def extraer_articulo(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> dict:
     """
-    Descarga una URL de articulo y devuelve un dict listo para usar con
-    summarizer.generar_guion_reel():
-        {titulo, fuente, link, texto}
-    Pensado para cuando el usuario pega un link puntual (no viene de una
-    busqueda por RSS, asi que no hay titulo/fuente previos).
+    Descarga una URL de articulo y devuelve un dict con el contenido y los
+    metadatos de atribución (autor, fecha, fuente, descripción…).
     """
     html = _descargar(url, timeout=timeout)
     soup = BeautifulSoup(html, "html.parser")
 
-    # el titulo/fuente se leen ANTES de limpiar el soup (por si el titulo
-    # estuviera dentro de algun tag que _limpiar_soup luego elimina)
+    # Leer metadatos ANTES de limpiar el soup
     titulo = _extraer_titulo(soup)
     fuente = _extraer_fuente(url, soup)
+    autor = _extraer_autor(soup)
+    fecha = _extraer_fecha(soup)
+    descripcion = _extraer_descripcion(soup)
+    seccion = _extraer_seccion(soup)
+    url_autor = _extraer_url_autor(url, soup)
 
     texto = _extraer_parrafos(soup, min_len_parrafo)
 
@@ -189,6 +314,12 @@ def extraer_articulo(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> 
         "fuente": fuente,
         "link": url,
         "texto": texto,
+        # Metadatos de atribución
+        "autor": autor,
+        "fecha_publicacion": fecha,
+        "descripcion": descripcion,
+        "seccion": seccion,
+        "url_autor": url_autor,
     }
 
 

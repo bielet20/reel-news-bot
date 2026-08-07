@@ -1,5 +1,5 @@
-# Backend – Python 3.10 + CUDA 12.1 + SadTalker
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+# Backend – Python 3.11 + CUDA 12.8 + SadTalker (compatible RTX 5000 Blackwell)
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -38,7 +38,7 @@ RUN python3.10 -m venv /opt/sadtalker_venv && \
     /opt/sadtalker_venv/bin/pip install --no-cache-dir --upgrade pip && \
     /opt/sadtalker_venv/bin/pip install --no-cache-dir \
         torch torchvision torchaudio \
-        --index-url https://download.pytorch.org/whl/cu121 && \
+        --index-url https://download.pytorch.org/whl/cu128 && \
     /opt/sadtalker_venv/bin/pip install --no-cache-dir \
         -r /tmp/st_requirements.txt && \
     /opt/sadtalker_venv/bin/pip install --no-cache-dir huggingface_hub

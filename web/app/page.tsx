@@ -25,11 +25,28 @@ const MODES: { id: Mode; label: string; icon: string; desc: string }[] = [
   { id: "tema",      label: "Tema",         icon: "🔍", desc: "Busca noticias sobre un tema y genera el reel" },
 ];
 
+interface Attribution {
+  titulo_original?: string;
+  fuente?: string;
+  url_original?: string;
+  autor?: string;
+  fecha_publicacion?: string;
+  descripcion?: string;
+  seccion?: string;
+  url_autor?: string;
+  caption?: string;
+}
+
 interface JobState {
   id: string;
   status: "pending" | "running" | "completed" | "failed";
   logs: string;
   output_files: string[];
+  attribution?: Attribution | null;
+  youtube_url?: string | null;
+  youtube_status?: "subiendo" | "ok" | "error" | null;
+  youtube_error?: string | null;
+  subir_youtube?: boolean;
 }
 
 const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }> = {
@@ -44,7 +61,11 @@ interface SummaryItem {
   label: string;
   value?: string;
   active: boolean;
-  always?: boolean; // siempre incluido, sin toggle
+  always?: boolean;       // siempre incluido, sin toggle
+  onToggle?: () => void;  // muestra un toggle interactivo
+  editValue?: string;     // valor actual del campo editable
+  onEdit?: (v: string) => void; // muestra un input editable
+  editPlaceholder?: string;
 }
 interface SummaryGroup { title: string; items: SummaryItem[] }
 
@@ -55,12 +76,19 @@ export default function Home() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   const [url, setUrl] = useState("");
+  const [urlFuente, setUrlFuente] = useState(""); // link original al usar Descubrir → Texto
   const [titulo, setTitulo] = useState("");
   const [fuente, setFuente] = useState("");
   const [texto, setTexto] = useState("");
   const [tema, setTema] = useState("");
   const [artista, setArtista] = useState("");
   const [modoYt, setModoYt] = useState("clip");
+  const [ytAutoSegmento, setYtAutoSegmento] = useState(false);
+  const [musicaMostrarNombre, setMusicaMostrarNombre] = useState(false);
+  const [tipoContenido, setTipoContenido] = useState<"noticia" | "curiosidad">("noticia");
+  const [subirYoutube, setSubirYoutube] = useState(false);
+  const [ytCredOk, setYtCredOk] = useState<boolean | null>(null);
+  const [ytCanal, setYtCanal] = useState("");
   const [cantidad, setCantidad] = useState(1);
   const [duracion, setDuracion] = useState(60);
   const [marca, setMarca] = useState("");
@@ -94,20 +122,34 @@ export default function Home() {
   const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
-    if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") {
+    const stillUploading =
+      activeJob?.status === "completed" && activeJob?.youtube_status === "subiendo";
+    const isActive =
+      activeJob && (activeJob.status === "pending" || activeJob.status === "running" || stillUploading);
+
+    if (!isActive) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       return;
     }
     intervalRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`/api/jobs/${activeJob.id}`);
+        const res = await fetch(`/api/jobs/${activeJob!.id}`);
         if (!res.ok) return;
         const data = await res.json();
         setActiveJob((prev) => prev ? { ...prev, ...data } : null);
       } catch { /* retry */ }
     }, 2000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [activeJob?.id, activeJob?.status]);
+  }, [activeJob?.id, activeJob?.status, activeJob?.youtube_status]);
+
+  // Verificar credenciales de YouTube cuando se activa el toggle
+  useEffect(() => {
+    if (!subirYoutube || ytCredOk !== null) return;
+    fetch("/api/youtube/status")
+      .then((r) => r.json())
+      .then((d) => { setYtCredOk(d.ok); setYtCanal(d.canal || ""); })
+      .catch(() => setYtCredOk(false));
+  }, [subirYoutube, ytCredOk]);
 
   useEffect(() => {
     if (logRef.current && logsExpanded) {
@@ -144,8 +186,12 @@ export default function Home() {
           ...(mode === "youtube" ? [
             { label: "Modo YouTube", value: modoYt === "clip" ? "Clip (video real)" : "Narrado (voz sintética)", active: true, always: true },
             { label: "Cantidad", value: `${cantidad} short(s)`, active: true, always: true },
+            { label: "Recorte automático al mejor segmento", active: ytAutoSegmento },
           ] : []),
-          ...(mode === "musica" && artista ? [{ label: "Artista", value: artista, active: true }] : []),
+          ...(mode === "musica" ? [
+            { label: "Nombre y artista en el video", active: musicaMostrarNombre },
+            ...(artista ? [{ label: "Artista", value: artista, active: musicaMostrarNombre }] : []),
+          ] : []),
           { label: "Duración máxima", value: `${duracion}s`, active: true, always: true },
         ],
       },
@@ -175,24 +221,40 @@ export default function Home() {
         ],
       },
       {
+        title: "Publicar en YouTube",
+        items: [
+          {
+            label: subirYoutube
+              ? `Subir a YouTube (${tipoContenido === "noticia" ? "📰 Noticia" : "💡 Curiosidad"})`
+              : "No subir a YouTube",
+            active: subirYoutube,
+            onToggle: () => setSubirYoutube((v) => !v),
+          },
+        ],
+      },
+      {
         title: "Texto en el video",
         items: [
           { label: "Subtítulos karaoke", value: "Incluidos siempre", active: true, always: true },
           {
             label: "Título del artículo",
-            value: mostrarTitulo ? (titulo || "título del artículo") : undefined,
             active: mostrarTitulo,
+            onToggle: () => setMostrarTitulo(!mostrarTitulo),
           },
           {
             label: "Texto personalizado",
-            value: textoPersonalizadoEnabled && textoPersonalizado.trim()
-              ? textoPersonalizado.trim() : undefined,
-            active: textoPersonalizadoEnabled && !!textoPersonalizado.trim(),
+            active: textoPersonalizadoEnabled,
+            onToggle: () => setTextoPersonalizadoEnabled(!textoPersonalizadoEnabled),
+            editValue: textoPersonalizado,
+            onEdit: (v) => setTextoPersonalizado(v),
+            editPlaceholder: "ej: nombre de la canción, fuente, subtítulo…",
           },
           {
             label: "Marca de agua",
-            value: marca.trim() || undefined,
             active: !!marca.trim(),
+            editValue: marca,
+            onEdit: (v) => setMarca(v),
+            editPlaceholder: "ej: @micanal — vacío = sin marca",
           },
         ],
       },
@@ -208,9 +270,9 @@ export default function Home() {
     const body: Record<string, unknown> = { mode, duracion_maxima: duracion };
 
     if (mode === "url") body.url = url;
-    else if (mode === "texto") { body.titulo = titulo; body.fuente = fuente; body.texto = texto; }
-    else if (mode === "youtube") { body.url = url; body.modo_youtube = modoYt; body.cantidad_shorts = cantidad; }
-    else if (mode === "musica") { body.url = url; body.artista = artista; }
+    else if (mode === "texto") { body.titulo = titulo; body.fuente = fuente; body.texto = texto; if (urlFuente) body.url_fuente = urlFuente; }
+    else if (mode === "youtube") { body.url = url; body.modo_youtube = modoYt; body.cantidad_shorts = cantidad; body.youtube_auto_segmento = ytAutoSegmento; }
+    else if (mode === "musica") { body.url = url; body.artista = artista; body.musica_mostrar_nombre = musicaMostrarNombre; }
     else if (mode === "tema") body.tema = tema;
 
     if (imgConfig.mode === "upload") body.imagenes_subidas = imgConfig.uploadedPaths;
@@ -234,6 +296,9 @@ export default function Home() {
       body.volumen_voz = volumenVoz / 100;
     }
 
+    body.tipo_contenido = tipoContenido;
+    body.subir_youtube  = subirYoutube;
+
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -242,7 +307,7 @@ export default function Home() {
       });
       if (!res.ok) throw new Error(await res.text());
       const { job_id } = await res.json();
-      setActiveJob({ id: job_id, status: "pending", logs: "", output_files: [] });
+      setActiveJob({ id: job_id, status: "pending", logs: "", output_files: [], attribution: null });
       setLogsExpanded(false);
     } catch (err) {
       setError(String(err));
@@ -268,6 +333,7 @@ export default function Home() {
     setTitulo(noticia.titulo);
     setFuente(noticia.fuente || "");
     setTexto(textoLimpio || noticia.titulo_original);
+    setUrlFuente(noticia.link || "");
     setError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -426,27 +492,43 @@ export default function Home() {
             )}
 
             {mode === "youtube" && (
-              <div className="flex gap-4">
-                <Field label="Modo" className="flex-1">
-                  <SelectInput value={modoYt} onChange={setModoYt} options={[
-                    { value: "clip",    label: "Clip (video real recortado)" },
-                    { value: "narrado", label: "Narrado (voz sintética)" },
-                  ]} />
-                </Field>
-                <Field label="Cantidad" className="w-36">
-                  <SelectInput value={String(cantidad)} onChange={(v) => setCantidad(Number(v))} options={[
-                    { value: "1", label: "1 short" },
-                    { value: "2", label: "2 shorts" },
-                    { value: "3", label: "3 shorts" },
-                  ]} />
-                </Field>
-              </div>
+              <>
+                <div className="flex gap-4">
+                  <Field label="Modo" className="flex-1">
+                    <SelectInput value={modoYt} onChange={setModoYt} options={[
+                      { value: "clip",    label: "Clip (video real recortado)" },
+                      { value: "narrado", label: "Narrado (voz sintética)" },
+                    ]} />
+                  </Field>
+                  <Field label="Cantidad" className="w-36">
+                    <SelectInput value={String(cantidad)} onChange={(v) => setCantidad(Number(v))} options={[
+                      { value: "1", label: "1 short" },
+                      { value: "2", label: "2 shorts" },
+                      { value: "3", label: "3 shorts" },
+                    ]} />
+                  </Field>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <Toggle value={ytAutoSegmento} onChange={setYtAutoSegmento} />
+                  <span style={{ fontSize: 13, color: ytAutoSegmento ? "var(--text)" : "var(--muted)" }}>
+                    {ytAutoSegmento ? "Detección automática del mejor segmento activada" : "Sin recorte automático (usa el inicio del video)"}
+                  </span>
+                </label>
+              </>
             )}
 
             {mode === "musica" && (
-              <Field label="Artista (opcional)">
-                <TextInput value={artista} onChange={setArtista} placeholder="Nombre del artista" />
-              </Field>
+              <>
+                <Field label="Artista (opcional)">
+                  <TextInput value={artista} onChange={setArtista} placeholder="Nombre del artista" />
+                </Field>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <Toggle value={musicaMostrarNombre} onChange={setMusicaMostrarNombre} />
+                  <span style={{ fontSize: 13, color: musicaMostrarNombre ? "var(--text)" : "var(--muted)" }}>
+                    {musicaMostrarNombre ? "Nombre de canción y artista visibles en el video" : "Sin nombre de canción ni artista"}
+                  </span>
+                </label>
+              </>
             )}
 
             {(mode === "url" || mode === "texto" || mode === "tema") && (
@@ -615,6 +697,51 @@ export default function Home() {
               />
             </Field>
 
+            {/* ── Publicar en YouTube ──────────────────────────────── */}
+            <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>Publicar en YouTube</p>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: subirYoutube ? 12 : 0 }}>
+                <Toggle value={subirYoutube} onChange={(v) => { setSubirYoutube(v); if (v && ytCredOk === null) setYtCredOk(null); }} />
+                <span style={{ fontSize: 13, color: subirYoutube ? "var(--text)" : "var(--muted)" }}>
+                  {subirYoutube ? "Subir y publicar en YouTube al terminar" : "No subir a YouTube"}
+                </span>
+              </label>
+
+              {subirYoutube && (
+                <>
+                  {ytCredOk === false && (
+                    <div style={{ fontSize: 11, color: "#f87171", background: "#2a1515", border: "1px solid #5a2020", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
+                      ⚠️ Credenciales de YouTube no configuradas.{" "}
+                      <span style={{ opacity: 0.8 }}>Ejecuta <code>python scripts/youtube_auth.py</code> y añade el token al .env</span>
+                    </div>
+                  )}
+                  {ytCredOk === true && (
+                    <div style={{ fontSize: 11, color: "#4ade80", background: "#0a2a1a", border: "1px solid #1a5a2a", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
+                      ✓ Conectado al canal: <strong>{ytCanal}</strong>
+                    </div>
+                  )}
+
+                  <p style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>Tipo de contenido</p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {(["noticia", "curiosidad"] as const).map((t) => {
+                      const info = t === "noticia"
+                        ? { icon: "📰", label: "Noticia",    desc: "Playlist Últimas Noticias" }
+                        : { icon: "💡", label: "Curiosidad", desc: "Playlist Curiosidades" };
+                      return (
+                        <button key={t} type="button" onClick={() => setTipoContenido(t)}
+                          style={{ flex: 1, padding: "8px 6px", borderRadius: 8, border: `1px solid ${tipoContenido === t ? "var(--accent)" : "var(--border)"}`, background: tipoContenido === t ? "rgba(99,102,241,0.12)" : "var(--surface)", cursor: "pointer", textAlign: "center" }}>
+                          <div style={{ fontSize: 18, marginBottom: 2 }}>{info.icon}</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: tipoContenido === t ? "var(--accent)" : "var(--text)" }}>{info.label}</div>
+                          <div style={{ fontSize: 10, color: "var(--muted)" }}>{info.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
             <Field label={`Duración máxima: ${duracion}s`}>
               <input
                 type="range" min={20} max={60} value={duracion}
@@ -715,29 +842,46 @@ function ConfirmModal({
               <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", margin: "0 0 8px" }}>
                 {group.title}
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {group.items.map((item) => (
-                  <div key={item.label} style={{
-                    display: "flex", alignItems: "baseline", gap: 8,
-                    opacity: item.active ? 1 : 0.38,
-                  }}>
-                    <span style={{
-                      fontSize: 13,
-                      color: item.active
-                        ? (item.always ? "var(--muted)" : "var(--success)")
-                        : "var(--muted)",
-                      flexShrink: 0,
-                    }}>
-                      {item.active ? (item.always ? "·" : "✓") : "—"}
-                    </span>
-                    <span style={{ fontSize: 13, color: item.active ? "var(--text)" : "var(--muted)" }}>
-                      {item.label}
-                      {item.value && (
-                        <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 12 }}>
-                          {item.value}
+                  <div key={item.label}>
+                    {item.onToggle ? (
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                        <Toggle value={item.active} onChange={item.onToggle} />
+                        <span style={{ fontSize: 13, color: item.active ? "var(--text)" : "var(--muted)" }}>
+                          {item.label}
+                          {item.active && item.value && (
+                            <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 12 }}>{item.value}</span>
+                          )}
                         </span>
-                      )}
-                    </span>
+                      </label>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, opacity: item.active || item.onEdit ? 1 : 0.38 }}>
+                        <span style={{ fontSize: 13, color: item.active ? (item.always ? "var(--muted)" : "var(--success)") : "var(--muted)", flexShrink: 0 }}>
+                          {item.active ? (item.always ? "·" : "✓") : (item.onEdit ? "·" : "—")}
+                        </span>
+                        <span style={{ fontSize: 13, color: item.active ? "var(--text)" : "var(--muted)" }}>
+                          {item.label}
+                          {item.active && item.value && (
+                            <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 12 }}>{item.value}</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {item.onEdit && (item.active || !item.onToggle) && (
+                      <input
+                        value={item.editValue ?? ""}
+                        onChange={(e) => item.onEdit!(e.target.value)}
+                        placeholder={item.editPlaceholder}
+                        style={{
+                          width: "100%", marginTop: 5,
+                          background: "var(--bg)", border: "1px solid var(--border)",
+                          borderRadius: 8, padding: "6px 10px",
+                          fontSize: 12, color: "var(--text)", outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -787,16 +931,19 @@ function JobPanel({
   logRef: React.RefObject<HTMLPreElement | null>;
 }) {
   const st = STATUS_STYLE[job.status] || STATUS_STYLE.pending;
+  const ytUploading = job.status === "completed" && job.youtube_status === "subiendo";
 
   return (
     <div className="mt-4 rounded-2xl overflow-hidden" style={{ border: `1px solid ${st.color}40` }}>
       <div className="flex items-center justify-between px-4 py-3"
         style={{ background: st.bg, borderBottom: `1px solid ${st.color}30` }}>
         <div className="flex items-center gap-2">
-          {(job.status === "pending" || job.status === "running") && (
+          {(job.status === "pending" || job.status === "running" || ytUploading) && (
             <span className="inline-block animate-spin text-base">⟳</span>
           )}
-          <span className="text-sm font-medium" style={{ color: st.color }}>{st.label}</span>
+          <span className="text-sm font-medium" style={{ color: st.color }}>
+            {ytUploading ? "Subiendo a YouTube…" : st.label}
+          </span>
           <span className="text-xs" style={{ color: "var(--muted)" }}>#{job.id}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -835,6 +982,38 @@ function JobPanel({
         </div>
       )}
 
+      {job.status === "completed" && job.attribution && (
+        <AttributionPanel attribution={job.attribution} />
+      )}
+
+      {/* Panel YouTube */}
+      {job.subir_youtube && job.status === "completed" && (
+        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface)" }}>
+          <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 8 }}>
+            YouTube
+          </p>
+          {job.youtube_status === "subiendo" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#60a5fa" }}>
+              <span className="animate-spin">⟳</span> Subiendo el video al canal…
+            </div>
+          )}
+          {job.youtube_status === "ok" && job.youtube_url && (
+            <a href={job.youtube_url} target="_blank" rel="noopener noreferrer"
+              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#4ade80", fontWeight: 600, textDecoration: "none" }}>
+              ✓ Publicado en YouTube →
+              <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>
+                {job.youtube_url}
+              </span>
+            </a>
+          )}
+          {job.youtube_status === "error" && (
+            <div style={{ fontSize: 12, color: "#f87171" }}>
+              ⚠️ Error al subir a YouTube{job.youtube_error ? `: ${job.youtube_error}` : ""}
+            </div>
+          )}
+        </div>
+      )}
+
       {job.status === "failed" && (
         <div className="px-4 py-3 space-y-2" style={{ background: "var(--surface)" }}>
           {!logsExpanded && (
@@ -848,6 +1027,142 @@ function JobPanel({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Panel de atribución de fuente ─────────────────────────────────────────────
+function AttributionPanel({ attribution }: { attribution: Attribution }) {
+  const [copied, setCopied] = useState(false);
+  const [tipo, setTipo] = useState<"noticia" | "curiosidad">("noticia");
+
+  const campos = [
+    attribution.fuente            && { icon: "📰", label: "Fuente",   value: attribution.fuente },
+    attribution.autor             && { icon: "✍️",  label: "Autor",    value: attribution.autor },
+    attribution.fecha_publicacion && { icon: "📅", label: "Fecha",    value: attribution.fecha_publicacion.slice(0, 10) },
+    attribution.seccion           && { icon: "📂", label: "Sección",  value: attribution.seccion },
+  ].filter(Boolean) as { icon: string; label: string; value: string }[];
+
+  if (!campos.length && !attribution.url_original) return null;
+
+  function buildYouTubeDesc(): string {
+    const titulo   = attribution.titulo_original || "";
+    const fuente   = attribution.fuente || "";
+    const autor    = attribution.autor || "";
+    const fecha    = (attribution.fecha_publicacion || "").slice(0, 10);
+    const seccion  = attribution.seccion || "";
+    const url      = attribution.url_original || "";
+    const desc     = attribution.descripcion || "";
+    const fueteTag = fuente.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ]/g, "");
+
+    const encabezado = tipo === "noticia"
+      ? `🔴 ÚLTIMA HORA: ${titulo}`
+      : `💡 ¿LO SABÍAS? ${titulo}`;
+
+    const bloqueAtrib = [
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "📰 FUENTE ORIGINAL",
+      fuente   ? `Medio:     ${fuente}`   : "",
+      autor    ? `Autor:     ${autor}`    : "",
+      fecha    ? `Publicado: ${fecha}`    : "",
+      seccion  ? `Sección:   ${seccion}`  : "",
+      url      ? `🔗 ${url}`             : "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ].filter(Boolean).join("\n");
+
+    const hashTags = tipo === "noticia"
+      ? `#Noticias #UltimaHora #NoticiasVerificadas${fueteTag ? ` #${fueteTag}` : ""}`
+      : `#Curiosidades #SabíasQue #DatosInteresantes${fueteTag ? ` #${fueteTag}` : ""}`;
+
+    return [
+      encabezado,
+      "",
+      desc || "",
+      desc ? "" : null,
+      bloqueAtrib,
+      "",
+      "⚠️ Este vídeo es un resumen informativo. Los derechos del contenido",
+      "original pertenecen al medio citado arriba.",
+      "",
+      "─────────────────────────────────",
+      "🔔 SUSCRÍBETE para no perderte las últimas noticias verificadas",
+      "👍 Dale like si te ha resultado útil",
+      "─────────────────────────────────",
+      "",
+      hashTags,
+    ].filter((l) => l !== null).join("\n");
+  }
+
+  function handleCopy() {
+    const text = buildYouTubeDesc();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
+  return (
+    <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface)" }}>
+      <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 8 }}>
+        Fuente original
+      </p>
+
+      {/* Metadatos */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
+        {campos.map(({ icon, label, value }) => (
+          <div key={label} style={{ display: "flex", gap: 6, fontSize: 12 }}>
+            <span>{icon}</span>
+            <span style={{ color: "var(--muted)" }}>{label}:</span>
+            <span style={{ color: "var(--text)" }}>{value}</span>
+          </div>
+        ))}
+        {attribution.url_original && (
+          <div style={{ display: "flex", gap: 6, fontSize: 12 }}>
+            <span>🔗</span>
+            <a href={attribution.url_original} target="_blank" rel="noopener noreferrer"
+              style={{ color: "var(--accent)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 340 }}>
+              {attribution.url_original}
+            </a>
+          </div>
+        )}
+        {attribution.url_autor && (
+          <div style={{ display: "flex", gap: 6, fontSize: 12 }}>
+            <span>👤</span>
+            <a href={attribution.url_autor} target="_blank" rel="noopener noreferrer"
+              style={{ color: "var(--accent)" }}>
+              Perfil del autor
+            </a>
+          </div>
+        )}
+      </div>
+
+      {/* Selector de tipo para la descripción */}
+      <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", marginBottom: 6 }}>
+        Descripción para YouTube
+      </p>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        {(["noticia", "curiosidad"] as const).map((t) => {
+          const info = t === "noticia" ? { icon: "📰", label: "Noticia" } : { icon: "💡", label: "Curiosidad" };
+          return (
+            <button key={t} type="button" onClick={() => setTipo(t)}
+              style={{ flex: 1, padding: "5px 0", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${tipo === t ? "var(--accent)" : "var(--border)"}`, background: tipo === t ? "rgba(99,102,241,0.12)" : "var(--surface2)", color: tipo === t ? "var(--accent)" : "var(--muted)" }}>
+              {info.icon} {info.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Preview de la descripción */}
+      <pre style={{ fontSize: 10, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 7, padding: "8px 10px", maxHeight: 160, overflowY: "auto", whiteSpace: "pre-wrap", marginBottom: 8, fontFamily: "ui-monospace, monospace", lineHeight: 1.5 }}>
+        {buildYouTubeDesc()}
+      </pre>
+
+      <button
+        onClick={handleCopy}
+        style={{ width: "100%", padding: "8px 0", borderRadius: 8, fontSize: 12, cursor: "pointer", background: copied ? "#0a2a1a" : "var(--accent)", border: `1px solid ${copied ? "var(--success)" : "transparent"}`, color: copied ? "var(--success)" : "#fff", fontWeight: 700 }}
+      >
+        {copied ? "✓ Copiado al portapapeles" : "📋 Copiar descripción para YouTube Studio"}
+      </button>
     </div>
   );
 }

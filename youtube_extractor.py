@@ -26,7 +26,8 @@ def _video_id_desde_url(url: str) -> str:
     patrones = [
         r'[?&]v=([a-zA-Z0-9_-]{11})',
         r'youtu\.be/([a-zA-Z0-9_-]{11})',
-        r'youtube\.com/(?:shorts|embed)/([a-zA-Z0-9_-]{11})',
+        r'youtube\.com/(?:shorts|embed|live)/([a-zA-Z0-9_-]{11})',
+        r'studio\.youtube\.com/video/([a-zA-Z0-9_-]{11})',  # YouTube Studio
     ]
     for patron in patrones:
         m = re.search(patron, url)
@@ -35,7 +36,7 @@ def _video_id_desde_url(url: str) -> str:
     raise ValueError(
         f"No se pudo extraer el ID del video de: {url}\n"
         "Formatos soportados: youtube.com/watch?v=..., youtu.be/..., "
-        "youtube.com/shorts/..."
+        "youtube.com/shorts/..., studio.youtube.com/video/..."
     )
 
 

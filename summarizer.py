@@ -350,15 +350,16 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
     palabras_texto = len(texto_completo.split())
     palabras_titulo = len(titulo.split())
 
-    # Rechazar si no hay contenido real sobre el que escribir
-    if palabras_texto < 30 and palabras_titulo < 10:
+    # Rechazar solo si no hay absolutamente nada con lo que trabajar
+    if palabras_texto < 5 and palabras_titulo < 3:
         raise ValueError(
             f"Contenido insuficiente para generar un reel "
             f"({palabras_texto} palabras). "
             f"Proporciona al menos el texto del artículo o una descripción detallada."
         )
 
-    fuente_texto = texto_completo if palabras_texto > 30 else titulo
+    # Con poco texto usa el título como fuente principal; Claude puede expandirlo
+    fuente_texto = texto_completo if palabras_texto >= 20 else titulo
 
     limite_chars = 40000 if tipo == "video" else 4000
     extracto = fuente_texto[:limite_chars]

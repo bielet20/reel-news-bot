@@ -71,11 +71,89 @@ def _slug(texto: str, max_len: int = 60) -> str:
     return texto[:max_len] or "reel"
 
 
+def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
+                         atribucion: dict = None) -> dict:
+    """
+    Guarda los datos de atribución del artículo original junto al reel:
+      - {slug}_fuente.json  → metadatos completos en JSON
+      - {slug}_caption.txt  → texto listo para copiar como descripción del post
+    Devuelve el dict de atribución guardado.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    at = atribucion or {}
+    fuente_completa = {
+        "titulo_original": noticia.get("titulo", ""),
+        "fuente": noticia.get("fuente", ""),
+        "url_original": noticia.get("link", ""),
+        "autor": at.get("autor", ""),
+        "fecha_publicacion": at.get("fecha_publicacion", ""),
+        "descripcion": at.get("descripcion", "") or noticia.get("resumen", ""),
+        "seccion": at.get("seccion", ""),
+        "url_autor": at.get("url_autor", ""),
+        "extraido_en": datetime.now(timezone.utc).isoformat(),
+    }
+
+    ruta_fuente = os.path.join(carpeta, f"{slug}_fuente.json")
+    with open(ruta_fuente, "w", encoding="utf-8") as f:
+        _json.dump(fuente_completa, f, ensure_ascii=False, indent=2)
+
+    # Caption para YouTube — descripción lista para pegar en YouTube Studio
+    titulo    = noticia.get("titulo", "")
+    fuente    = fuente_completa.get("fuente", "")
+    autor     = fuente_completa.get("autor", "")
+    fecha_pub = fuente_completa.get("fecha_publicacion", "")[:10]
+    seccion   = fuente_completa.get("seccion", "")
+    url_orig  = fuente_completa.get("url_original", "")
+    descripcion_art = fuente_completa.get("descripcion", "")
+
+    # Hashtag de la fuente (sin espacios ni caracteres especiales)
+    import re as _re
+    fuente_tag = _re.sub(r"[^a-zA-ZáéíóúÁÉÍÓÚñÑ]", "", fuente) if fuente else ""
+
+    lineas = [titulo, ""]
+
+    if descripcion_art:
+        lineas += [descripcion_art, ""]
+
+    lineas.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lineas.append("📰 FUENTE ORIGINAL")
+    if fuente:    lineas.append(f"Medio:     {fuente}")
+    if autor:     lineas.append(f"Autor:     {autor}")
+    if fecha_pub: lineas.append(f"Publicado: {fecha_pub}")
+    if seccion:   lineas.append(f"Sección:   {seccion}")
+    if url_orig:  lineas.append(f"🔗 {url_orig}")
+    lineas.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    lineas += [
+        "",
+        "⚠️ Este vídeo es un resumen informativo. Los derechos del contenido",
+        "original pertenecen al medio citado arriba.",
+        "",
+        "─────────────────────────────────",
+        "🔔 SUSCRÍBETE para no perderte ninguna noticia verificada",
+        "👍 Dale like si te ha resultado útil",
+        "─────────────────────────────────",
+        "",
+        "#Noticias #UltimaHora #NoticiasVerificadas"
+        + (f" #{fuente_tag}" if fuente_tag else ""),
+    ]
+
+    ruta_caption = os.path.join(carpeta, f"{slug}_caption.txt")
+    with open(ruta_caption, "w", encoding="utf-8") as f:
+        f.write("\n".join(lineas))
+
+    print(f"   Atribución guardada: {ruta_fuente}")
+    return fuente_completa
+
+
 def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SALIDA,
                       duracion_maxima: int = 60, texto_articulo: str = None,
                       tipo: str = "articulo", imagenes: list = None,
                       generar_imagenes_ai: bool = False,
                       servicio_ai: str = "pollinations",
+                      atribucion: dict = None,
                       ruta_avatar_img: str = None,
                       servicio_avatar: str = "auto",
                       servicio_voz: str = "auto",
@@ -98,12 +176,23 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
     """
     print(f"\n=== Procesando: {noticia['titulo']} ===")
 
+    link = noticia.get("link", "")
+    tiene_link_valido = bool(link and link.startswith("http"))
+
     if texto_articulo is None:
-        print("-> Descargando articulo completo...")
-        texto_articulo = extraer_texto(noticia["link"])
-        if len(texto_articulo.split()) < 30:
+        if tiene_link_valido:
+            print("-> Descargando articulo completo...")
+            texto_articulo = extraer_texto(link)
+        if not texto_articulo or len(texto_articulo.split()) < 30:
             print("   (no se pudo extraer suficiente texto, usando el resumen del RSS)")
             texto_articulo = noticia.get("resumen", "") or noticia["titulo"]
+    elif len(texto_articulo.split()) < 50 and tiene_link_valido:
+        # Texto pegado muy corto (ej: resumen RSS de Descubrir) → intentar artículo completo
+        print("-> Texto muy corto, intentando descargar el artículo completo...")
+        texto_completo = extraer_texto(link)
+        if len(texto_completo.split()) > len(texto_articulo.split()):
+            texto_articulo = texto_completo
+            print(f"   Artículo descargado: {len(texto_articulo.split())} palabras")
 
     print("-> Generando guion del reel...")
     guion = generar_guion_reel_claude(noticia["titulo"], texto_articulo,
@@ -131,9 +220,11 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
     # Pipeline de imágenes
     import tempfile
     carpeta_imgs = tempfile.mkdtemp(prefix="_imgs_")
+    url_art = noticia.get("link") if not (noticia.get("link") or "").startswith("/") else None
     imgs_fondo = preparar_imagenes(
         titulo=noticia["titulo"],
-        url_articulo=noticia.get("link") if not noticia.get("link", "").startswith("/") else None,
+        url_articulo=url_art,
+        texto_articulo=texto_articulo or "",
         rutas_usuario=imagenes or [],
         generar_ai=generar_imagenes_ai,
         n_ai=3,
@@ -168,6 +259,9 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                     volumen_voz=volumen_voz,
                     texto_personalizado=texto_personalizado)
     print(f"   Video generado: {ruta_video}")
+
+    # Guardar atribución de la fuente original
+    _guardar_atribucion(slug, carpeta_salida, noticia, atribucion)
 
     # Limpiar imágenes temporales
     import shutil
@@ -220,6 +314,16 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
         "fuente": articulo["fuente"],
         "resumen": "",
     }
+    atribucion = {
+        "autor": articulo.get("autor", ""),
+        "fecha_publicacion": articulo.get("fecha_publicacion", ""),
+        "descripcion": articulo.get("descripcion", ""),
+        "seccion": articulo.get("seccion", ""),
+        "url_autor": articulo.get("url_autor", ""),
+    }
+    if any(atribucion.values()):
+        print(f"   Autor: {atribucion['autor'] or '(no detectado)'}  "
+              f"Fecha: {atribucion['fecha_publicacion'][:10] if atribucion['fecha_publicacion'] else '(no detectada)'}")
     print(f"   Titulo detectado: {noticia['titulo']}  (fuente: {noticia['fuente']})")
     return procesar_noticia(noticia, tema, carpeta_salida=carpeta_salida,
                              duracion_maxima=duracion_maxima,
@@ -227,6 +331,7 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
                              imagenes=imagenes,
                              generar_imagenes_ai=generar_imagenes_ai,
                              servicio_ai=servicio_ai,
+                             atribucion=atribucion,
                              ruta_avatar_img=ruta_avatar_img,
                              servicio_avatar=servicio_avatar,
                              servicio_voz=servicio_voz,
@@ -242,7 +347,8 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
 def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                      duracion_maxima: int = 60, modo: str = "clip",
                      cantidad_shorts: int = 1,
-                     cookies_browser: str = None) -> list:
+                     cookies_browser: str = None,
+                     auto_segmento: bool = False) -> list:
     """
     Genera uno o varios reels a partir de un video de YouTube.
 
@@ -285,11 +391,13 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                     datos, carpeta_salida, slug,
                     n=cantidad_shorts, duracion_maxima=duracion_maxima,
                     cookies_browser=cookies_browser,
+                    auto_segmento=auto_segmento,
                 )
             else:
                 r = generar_reel_desde_clip(
                     datos, carpeta_salida, slug, duracion_maxima=duracion_maxima,
                     cookies_browser=cookies_browser,
+                    auto_segmento=auto_segmento,
                 )
                 resultados = [r]
 
@@ -378,7 +486,8 @@ def procesar_video_local(ruta: str, carpeta_salida: str = CARPETA_SALIDA,
 
 def procesar_musica(fuente: str, carpeta_salida: str = CARPETA_SALIDA,
                      duracion_maxima: int = 60, ruta_letra: str = None,
-                     artista: str = None, cookies_browser: str = None) -> str:
+                     artista: str = None, cookies_browser: str = None,
+                     mostrar_nombre: bool = False) -> str:
     """
     Genera un reel musical a partir de:
       - URL de YouTube (video musical)
@@ -470,15 +579,19 @@ def procesar_musica(fuente: str, carpeta_salida: str = CARPETA_SALIDA,
     ruta_salida = os.path.join(carpeta_salida, f"{slug}_music_reel.mp4")
 
     try:
+        titulo_mostrar = titulo if mostrar_nombre else ""
+        artista_mostrar = artista_display if mostrar_nombre else ""
         if es_video_local:
             construir_reel_musical_desde_video(
                 ruta_media, highlight["inicio"], highlight["fin"],
-                titulo, artista_display, lineas_letra, ruta_salida,
+                titulo_mostrar, artista_mostrar, lineas_letra, ruta_salida,
+                mostrar_cabecera=mostrar_nombre,
             )
         else:
             construir_reel_musical_desde_audio(
                 ruta_media, highlight["inicio"], highlight["fin"],
-                titulo, artista_display, lineas_letra, ruta_salida,
+                titulo_mostrar, artista_mostrar, lineas_letra, ruta_salida,
+                mostrar_cabecera=mostrar_nombre,
             )
     finally:
         if limpiar_media and ruta_media and os.path.isfile(ruta_media):
@@ -529,7 +642,7 @@ def leer_articulo_desde_archivo(ruta: str) -> dict:
             f"El archivo {ruta} no tiene una linea 'TITULO: ...' al principio. "
             "Revisa el formato esperado en el README."
         )
-    if len(texto.split()) < 20:
+    if len(texto.split()) < 3:
         raise ValueError(
             f"El archivo {ruta} no tiene suficiente texto de articulo despues "
             "del encabezado (TITULO/FUENTE/LINK + linea en blanco)."
@@ -639,8 +752,9 @@ def main():
     parser.add_argument("--generar-imagenes-ai", action="store_true",
                         help="Genera imágenes de fondo con IA (Pollinations.ai, gratis).")
     parser.add_argument("--servicio-ai", default="pollinations",
-                        choices=["pollinations", "pexels"],
-                        help="Servicio de IA para generar imágenes (default: pollinations).")
+                        choices=["pollinations", "pexels", "unsplash", "pixabay"],
+                        help="Servicio para imágenes de fondo (default: pollinations). "
+                             "pexels/unsplash/pixabay buscan fotos reales y requieren API key.")
     # --- Avatar hablando (lip sync) ---
     parser.add_argument("--avatar", default=None, metavar="RUTA_IMAGEN",
                         help="Ruta a una foto del avatar (cara) para animar con lip sync. "
@@ -674,6 +788,12 @@ def main():
     parser.add_argument("--texto-personalizado", default=None, metavar="TEXTO",
                         help="Texto adicional que aparece en el video (ej: nombre de canción, "
                              "fuente, subtítulo libre). Solo se muestra si se indica.")
+    parser.add_argument("--auto-segmento-youtube", action="store_true",
+                        help="Activa la detección automática del mejor segmento en modo YouTube. "
+                             "Por defecto desactivado (usa el inicio del video).")
+    parser.add_argument("--mostrar-nombre-musica", action="store_true",
+                        help="Muestra el nombre de la canción y el artista en el reel musical. "
+                             "Por defecto desactivado.")
     parser.add_argument("--trending-yt", action="store_true",
                         help="Busca los videos en tendencia en YouTube y genera reels a "
                              "partir de sus transcripciones.")
@@ -702,6 +822,7 @@ def main():
                     ruta_letra=args.letra,
                     artista=args.artista,
                     cookies_browser=args.cookies_browser,
+                    mostrar_nombre=args.mostrar_nombre_musica,
                 )
                 generados.append(ruta)
             except Exception:
@@ -772,6 +893,7 @@ def main():
                     modo=args.modo_youtube,
                     cantidad_shorts=args.cantidad_shorts,
                     cookies_browser=args.cookies_browser,
+                    auto_segmento=args.auto_segmento_youtube,
                 )
                 generados.extend(rutas)
             except Exception:

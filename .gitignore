@@ -1,6 +1,8 @@
 # Entorno y secretos
 .env
 *.env
+.env.*
+*.env.*
 
 # Articulos de prueba locales (no son parte del codigo)
 articulo_*.txt

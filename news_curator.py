@@ -1,43 +1,55 @@
 """
 news_curator.py
-Busca noticias de actualidad y las evalúa con IA para proponer
-las de mayor potencial viral como reels.
+Busca noticias de fuentes verificadas y las evalúa con IA para proponer
+las de mayor potencial viral como reels. Prioriza primicias y recencia.
 """
 
 import json
 import os
 
 
-def buscar_y_curar(tema=None, pais="ES", variado=True, n_buscar=25, n_retornar=8):
+def buscar_y_curar(tema=None, pais="ES", variado=True, n_buscar=30, n_retornar=8):
     """
-    Busca noticias y devuelve las más virales ordenadas por score.
+    Busca noticias de fuentes confiables y devuelve las mejores ordenadas por score.
 
     Retorna lista de dicts:
       titulo, titulo_original, fuente, link, resumen,
-      score (0-10), categoria, gancho, audiencia
+      score (0-10), categoria, gancho, audiencia,
+      fecha, recencia, fuente_verificada
     """
     candidatos = _recopilar(tema, pais, variado, n_buscar)
     if not candidatos:
         return []
-    return _curar_con_ia(candidatos, n_retornar)
+    return _curar_con_ia(candidatos, n_retornar, tema)
 
 
 def _recopilar(tema, pais, variado, n):
-    """Obtiene noticias de varias fuentes."""
-    from news_fetcher import buscar_noticias, buscar_variadas, CATEGORIAS
+    """Obtiene noticias de fuentes verificadas, priorizando feeds directos."""
+    from news_fetcher import (
+        buscar_noticias, buscar_variadas, buscar_fuentes_directas,
+        buscar_tema_especializado, detectar_categoria,
+    )
 
     try:
         if variado or not tema:
-            pool = buscar_variadas(por_tema=4)
+            # Empieza con feeds directos de fuentes verificadas
+            pool = buscar_variadas(por_tema=3, pais=pais)
         else:
-            query = CATEGORIAS.get(tema.lower(), tema)
-            pool = buscar_noticias(query, pais=pais, max_resultados=n)
+            # Para tema específico: fuentes especializadas tienen prioridad máxima
+            categoria = detectar_categoria(tema)
+            if categoria:
+                pool = buscar_tema_especializado(tema, max_por_fuente=7)
+            else:
+                pool = buscar_fuentes_directas(pais=pais, max_por_fuente=5)
+            # Complementar con Google News filtrado por dominio confiable
+            pool += buscar_noticias(tema, pais=pais, max_resultados=n, solo_confiables=True)
 
-        # Si hay poco, complementar con trending
-        if len(pool) < 6:
+        # Complementar con trending si hay poco
+        if len(pool) < 8:
             try:
                 from trending_finder import buscar_trending_noticias
-                pool += buscar_trending_noticias(pais=pais, max_resultados=10)
+                trending = buscar_trending_noticias(pais=pais, max_resultados=10)
+                pool += [t for t in trending if t.get("fuente_verificada", False)]
             except Exception:
                 pass
 
@@ -45,7 +57,7 @@ def _recopilar(tema, pais, variado, n):
         vistos = set()
         unicos = []
         for item in pool:
-            key = item["titulo"][:50].lower()
+            key = item["titulo"][:50].lower().strip()
             if key not in vistos:
                 vistos.add(key)
                 unicos.append(item)
@@ -56,7 +68,7 @@ def _recopilar(tema, pais, variado, n):
         return []
 
 
-def _curar_con_ia(noticias, n):
+def _curar_con_ia(noticias, n, tema=None):
     """Evalúa noticias con Claude y devuelve las top-n rankeadas."""
     try:
         import anthropic
@@ -66,22 +78,43 @@ def _curar_con_ia(noticias, n):
 
     lista_txt = "\n\n".join(
         f"{i+1}. TÍTULO: {item['titulo']}\n"
-        f"   FUENTE: {item.get('fuente', '—')}\n"
-        f"   RESUMEN: {(item.get('resumen') or '')[:250]}"
+        f"   FUENTE: {item.get('fuente', '—')}"
+        f"{' ✓VERIFICADA' if item.get('fuente_verificada') else ''}\n"
+        f"   RECENCIA: {item.get('recencia', {}).get('label', 'desconocida')}\n"
+        f"   RESUMEN: {(item.get('resumen') or '')[:200]}"
         for i, item in enumerate(noticias)
     )
 
-    prompt = f"""Eres experto en contenido viral para redes sociales (TikTok, Instagram Reels, YouTube Shorts).
-Analiza estas {len(noticias)} noticias de actualidad y selecciona las {n} con MAYOR potencial viral para un short de 30-60 segundos.
+    filtro_tema = (
+        f"\nFILTRO DE RELEVANCIA OBLIGATORIO: el usuario busca '{tema}'.\n"
+        f"DESCARTA cualquier noticia que NO esté directamente relacionada con '{tema}'.\n"
+        f"Solo selecciona noticias donde '{tema}' sea el tema central o muy relevante.\n"
+        if tema else ""
+    )
 
+    prompt = f"""Eres experto en contenido viral para redes sociales (TikTok, Instagram Reels, YouTube Shorts).
+Analiza estas {len(noticias)} noticias de fuentes verificadas y selecciona las {n} con MAYOR potencial viral.
+{filtro_tema}
 {lista_txt}
+
+Criterios de puntuación (0-10):
+- 9-10: Impacto masivo, sorprendente, urgente, emotivo O primicia reciente (<2h)
+- 7-8: Interesante, relevante, genera opinión
+- 5-6: Útil o curioso para una audiencia específica
+- <5: No seleccionar (nunca incluir)
+
+REGLAS:
+- Primicias (<2h, <1h) reciben +2 puntos sobre su valor editorial base
+- Noticias recientes (<6h) reciben +1 punto
+- No selecciones noticias de hace más de 48h salvo impacto extraordinario
+- Prioriza variedad de sub-temas dentro de la categoría buscada{(chr(10) + f'- CRÍTICO: Si la noticia no es sobre «{tema}», NO la incluyas aunque sea interesante') if tema else ''}
 
 Devuelve SOLO este JSON (sin texto adicional, sin markdown):
 {{
   "seleccionadas": [
     {{
       "indice": <número 1-{len(noticias)}>,
-      "titulo_reel": "<título impactante/curioso para el reel, máx 80 chars>",
+      "titulo_reel": "<título impactante para el reel, máx 80 chars>",
       "score": <número 1-10 con un decimal>,
       "categoria": "<tecnologia|economia|mundo|politica|ciencia|salud|deportes|entretenimiento|cripto>",
       "gancho": "<por qué captará atención en 1 frase breve>",
@@ -90,12 +123,7 @@ Devuelve SOLO este JSON (sin texto adicional, sin markdown):
   ]
 }}
 
-Criterios de selección y puntuación:
-- 9-10: Impacto masivo, sorprendente, urgente o muy emotivo
-- 7-8: Interesante, relevante, genera opinión
-- 5-6: Útil o curioso para una audiencia específica
-- <5: No seleccionar
-Prioriza variedad de categorías. Ordena por score descendente."""
+Ordena por score descendente."""
 
     try:
         resp = client.messages.create(
@@ -128,12 +156,24 @@ Prioriza variedad de categorías. Ordena por score descendente."""
                     "categoria": item.get("categoria", "general"),
                     "gancho": item.get("gancho", ""),
                     "audiencia": item.get("audiencia", ""),
+                    "fecha": orig.get("fecha", ""),
+                    "recencia": orig.get("recencia", {}),
+                    "fuente_verificada": orig.get("fuente_verificada", False),
                 })
         return sorted(resultado, key=lambda x: x["score"], reverse=True)
 
     except Exception as e:
         print(f"[curator] Error IA ({e}), usando fallback")
-        return [_fallback_item(noticias[i], i) for i in range(min(n, len(noticias)))]
+        pool = noticias
+        if tema:
+            # Filtro básico por palabras del tema cuando la IA falla
+            palabras = tema.lower().split()
+            relevantes = [
+                it for it in pool
+                if any(p in (it.get("titulo", "") + it.get("resumen", "")).lower() for p in palabras)
+            ]
+            pool = relevantes or pool
+        return [_fallback_item(pool[i], i) for i in range(min(n, len(pool)))]
 
 
 def _resolver_url(url: str) -> str:
@@ -168,4 +208,7 @@ def _fallback_item(noticia, pos):
         "categoria": "general",
         "gancho": "",
         "audiencia": "",
+        "fecha": noticia.get("fecha", ""),
+        "recencia": noticia.get("recencia", {}),
+        "fuente_verificada": noticia.get("fuente_verificada", False),
     }

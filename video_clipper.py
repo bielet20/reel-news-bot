@@ -366,16 +366,10 @@ def _escribir_reel_desde_segmento(clip_original, highlight: dict,
         highlight["segmentos"], offset=inicio_real, duracion_clip=duracion_clip
     )
 
-    marca_img = _frame_texto(
-        "Recorte automatico", FONT_REGULAR, 30, y_centro=ALTO_V - 60,
-        max_ancho=900, con_fondo=False, color_texto=(255, 255, 255, 160),
-    )
-    marca_clip = ImageClip(np.array(marca_img)).set_duration(duracion_clip)
-
     video_final = None
     try:
         video_final = CompositeVideoClip(
-            [fondo, frente, titulo_clip] + clips_subs + [marca_clip],
+            [fondo, frente, titulo_clip] + clips_subs,
             size=(ANCHO_V, ALTO_V),
         ).set_audio(subclip.audio).set_duration(duracion_clip)
 
@@ -452,29 +446,42 @@ def generar_reel_desde_clip(datos_youtube: dict, carpeta_salida: str, slug: str,
                              duracion_maxima: int = 59, carpeta_tmp: str = None,
                              ruta_video_local: str = None,
                              cookies_browser: str = None,
-                             preset: str = "medium", fps: int = 30) -> dict:
+                             preset: str = "medium", fps: int = 30,
+                             auto_segmento: bool = True) -> dict:
     """
     Genera el reel recortando el video (YouTube o archivo local).
 
     datos_youtube:    dict de youtube_extractor o video_extractor
                       (debe incluir "segmentos" con marcas de tiempo).
     ruta_video_local: si se pasa, usa ese archivo en vez de descargar de YouTube.
+    auto_segmento:    True -> detecta el tramo mas informativo automaticamente.
+                      False -> usa el inicio del video (primeros duracion_maxima segundos).
     Devuelve dict:    {ruta_video, inicio, fin, duracion, texto_segmento, titulo}
     """
     segmentos = datos_youtube.get("segmentos") or []
-    if not segmentos:
-        raise ValueError(
-            "No hay segmentos con marca de tiempo disponibles para este video "
-            "(la transcripcion no trae timestamps)."
+
+    if auto_segmento:
+        if not segmentos:
+            raise ValueError(
+                "No hay segmentos con marca de tiempo disponibles para este video "
+                "(la transcripcion no trae timestamps)."
+            )
+        highlight = detectar_mejor_segmento(
+            segmentos, duracion_objetivo=min(45, duracion_maxima),
+            duracion_min=min(20, duracion_maxima), duracion_max=duracion_maxima,
         )
-
-    highlight = detectar_mejor_segmento(
-        segmentos, duracion_objetivo=min(45, duracion_maxima),
-        duracion_min=min(20, duracion_maxima), duracion_max=duracion_maxima,
-    )
-
-    print(f"   -> Mejor tramo detectado: {highlight['inicio']:.0f}s - "
-          f"{highlight['fin']:.0f}s ({highlight['duracion']:.0f}s)")
+        print(f"   -> Mejor tramo detectado: {highlight['inicio']:.0f}s - "
+              f"{highlight['fin']:.0f}s ({highlight['duracion']:.0f}s)")
+    else:
+        segs_ventana = [s for s in segmentos if s.get("start", 0) < duracion_maxima]
+        highlight = {
+            "inicio": 0.0,
+            "fin": float(duracion_maxima),
+            "duracion": float(duracion_maxima),
+            "segmentos": segs_ventana,
+            "texto": " ".join(s["text"] for s in segs_ventana),
+        }
+        print(f"   -> Sin recorte automático: usando inicio del video (hasta {duracion_maxima}s)")
 
     limpiar_origen = False
     if ruta_video_local:
@@ -516,31 +523,50 @@ def generar_multiples_reels_desde_clip(datos: dict, carpeta_salida: str,
                                         ruta_video_local: str = None,
                                         cookies_browser: str = None,
                                         preset: str = "medium",
-                                        fps: int = 30) -> list:
+                                        fps: int = 30,
+                                        auto_segmento: bool = True) -> list:
     """
-    Genera N shorts NO solapados a partir de un video.
+    Genera N shorts a partir de un video.
 
     datos:             dict con "titulo", "segmentos" y "url"
                        (formato de youtube_extractor o video_extractor).
     ruta_video_local:  Si se pasa, usa ese archivo local en vez de descargar
                        de YouTube (util para videos ya descargados o locales).
+    auto_segmento:     True -> detecta N tramos no solapados automaticamente.
+                       False -> divide en N segmentos consecutivos desde el inicio.
 
     Devuelve lista de dicts: [{ruta_video, inicio, fin, duracion, ...}, ...]
     """
     segmentos = datos.get("segmentos") or []
-    if not segmentos:
-        raise ValueError(
-            "No hay segmentos con marca de tiempo. "
-            "Asegurate de que la transcripcion incluya timestamps."
-        )
 
-    print(f"   -> Detectando los {n} mejores tramos no solapados...")
-    highlights = detectar_mejores_segmentos(
-        segmentos, n=n,
-        duracion_objetivo=min(45, duracion_maxima),
-        duracion_min=min(20, duracion_maxima),
-        duracion_max=duracion_maxima,
-    )
+    if auto_segmento:
+        if not segmentos:
+            raise ValueError(
+                "No hay segmentos con marca de tiempo. "
+                "Asegurate de que la transcripcion incluya timestamps."
+            )
+        print(f"   -> Detectando los {n} mejores tramos no solapados...")
+        highlights = detectar_mejores_segmentos(
+            segmentos, n=n,
+            duracion_objetivo=min(45, duracion_maxima),
+            duracion_min=min(20, duracion_maxima),
+            duracion_max=duracion_maxima,
+        )
+    else:
+        print(f"   -> Sin recorte automático: dividiendo en {n} segmentos consecutivos...")
+        highlights = []
+        for i in range(n):
+            inicio = i * float(duracion_maxima)
+            fin = (i + 1) * float(duracion_maxima)
+            segs_ventana = [s for s in segmentos
+                            if s.get("start", 0) >= inicio and s.get("start", 0) < fin]
+            highlights.append({
+                "inicio": inicio,
+                "fin": fin,
+                "duracion": float(duracion_maxima),
+                "segmentos": segs_ventana,
+                "texto": " ".join(s["text"] for s in segs_ventana),
+            })
 
     if not highlights:
         raise ValueError("No se pudieron detectar tramos validos en la transcripcion.")
