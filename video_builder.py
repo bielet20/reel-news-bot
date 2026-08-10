@@ -480,6 +480,7 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
                      ruta_avatar: str = None,
                      marca: str = None,
                      mostrar_titulo: bool = False,
+                     mostrar_subtitulos: bool = True,
                      musica_fondo: str = None,
                      volumen_musica: float = 0.3,
                      volumen_voz: float = 1.0,
@@ -559,8 +560,9 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
             y_subtitulos = ALTO - TAM_AVATAR - 200
 
     # Subtitulos animados palabra por palabra (karaoke)
-    clips_subtitulos = _clips_subtitulos_karaoke(
-        frases, tiempos, FONT_BOLD, y_centro=y_subtitulos
+    clips_subtitulos = (
+        _clips_subtitulos_karaoke(frases, tiempos, FONT_BOLD, y_centro=y_subtitulos)
+        if mostrar_subtitulos else []
     )
 
     # Texto personalizado (nombre canción, fuente, subtítulo libre…)

@@ -86,6 +86,7 @@ class GenerateRequest(BaseModel):
     # Marca/watermark en el video (None = sin marca)
     marca: Optional[str] = None
     mostrar_titulo: bool = True
+    mostrar_subtitulos: bool = True
     # Música de fondo
     musica_fondo: Optional[str] = None   # filename en _music/
     volumen_musica: float = 0.3
@@ -144,6 +145,8 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
         args += ["--marca", req.marca]
     if not req.mostrar_titulo:
         args += ["--sin-titulo"]
+    if not req.mostrar_subtitulos:
+        args += ["--sin-subtitulos"]
     if req.musica_fondo:
         music_path = CORE_DIR / "_music" / req.musica_fondo
         if music_path.exists():

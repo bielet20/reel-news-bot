@@ -160,6 +160,7 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                       voz: str = None,
                       marca: str = None,
                       mostrar_titulo: bool = False,
+                      mostrar_subtitulos: bool = True,
                       musica_fondo: str = None,
                       volumen_musica: float = 0.3,
                       volumen_voz: float = 1.0,
@@ -254,6 +255,7 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                     ruta_avatar=ruta_avatar_video,
                     marca=marca,
                     mostrar_titulo=mostrar_titulo,
+                    mostrar_subtitulos=mostrar_subtitulos,
                     musica_fondo=musica_fondo,
                     volumen_musica=volumen_musica,
                     volumen_voz=volumen_voz,
@@ -279,6 +281,7 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
                   ruta_avatar_img: str = None, servicio_avatar: str = "auto",
                   servicio_voz: str = "auto", voz: str = None,
                   marca: str = None, mostrar_titulo: bool = False,
+                  mostrar_subtitulos: bool = True,
                   musica_fondo: str = None, volumen_musica: float = 0.3,
                   volumen_voz: float = 1.0, texto_personalizado: str = None) -> str:
     """
@@ -338,6 +341,7 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
                              voz=voz,
                              marca=marca,
                              mostrar_titulo=mostrar_titulo,
+                             mostrar_subtitulos=mostrar_subtitulos,
                              musica_fondo=musica_fondo,
                              volumen_musica=volumen_musica,
                              volumen_voz=volumen_voz,
@@ -657,6 +661,7 @@ def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CAR
                       ruta_avatar_img: str = None, servicio_avatar: str = "auto",
                       servicio_voz: str = "auto", voz: str = None,
                       marca: str = None, mostrar_titulo: bool = False,
+                      mostrar_subtitulos: bool = True,
                       musica_fondo: str = None, volumen_musica: float = 0.3,
                       volumen_voz: float = 1.0, texto_personalizado: str = None) -> str:
     """Genera el reel a partir de un articulo pegado manualmente en un .txt."""
@@ -682,6 +687,7 @@ def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CAR
                              voz=voz,
                              marca=marca,
                              mostrar_titulo=mostrar_titulo,
+                             mostrar_subtitulos=mostrar_subtitulos,
                              musica_fondo=musica_fondo,
                              volumen_musica=volumen_musica,
                              volumen_voz=volumen_voz,
@@ -773,6 +779,8 @@ def main():
                              "voice_id de ElevenLabs.")
     parser.add_argument("--sin-titulo", action="store_true",
                         help="No muestra el título en el video (solo en el nombre del archivo)")
+    parser.add_argument("--sin-subtitulos", action="store_true",
+                        help="No muestra subtítulos karaoke en el video")
     parser.add_argument("--musica-fondo", default=None, metavar="RUTA",
                         help="Ruta a un archivo de música (MP3, WAV, etc.) para mezclar como "
                              "fondo del reel. El audio narrado suena encima de la música.")
@@ -848,6 +856,7 @@ def main():
                                     voz=args.voz,
                                     marca=args.marca,
                                     mostrar_titulo=not args.sin_titulo,
+                                    mostrar_subtitulos=not args.sin_subtitulos,
                                     musica_fondo=args.musica_fondo,
                                     volumen_musica=args.volumen_musica,
                                     volumen_voz=args.volumen_voz,
@@ -870,6 +879,7 @@ def main():
                                         voz=args.voz,
                                         marca=args.marca,
                                         mostrar_titulo=not args.sin_titulo,
+                                        mostrar_subtitulos=not args.sin_subtitulos,
                                         musica_fondo=args.musica_fondo,
                                         volumen_musica=args.volumen_musica,
                                         volumen_voz=args.volumen_voz,

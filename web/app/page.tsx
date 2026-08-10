@@ -93,6 +93,7 @@ export default function Home() {
   const [duracion, setDuracion] = useState(60);
   const [marca, setMarca] = useState("");
   const [mostrarTitulo, setMostrarTitulo] = useState(false);
+  const [mostrarSubtitulos, setMostrarSubtitulos] = useState(false);
   const [textoPersonalizadoEnabled, setTextoPersonalizadoEnabled] = useState(false);
   const [textoPersonalizado, setTextoPersonalizado] = useState("");
   const [imgConfig, setImgConfig] = useState<ImageConfig>({
@@ -235,7 +236,11 @@ export default function Home() {
       {
         title: "Texto en el video",
         items: [
-          { label: "Subtítulos karaoke", value: "Incluidos siempre", active: true, always: true },
+          {
+            label: "Subtítulos karaoke",
+            active: mostrarSubtitulos,
+            onToggle: () => setMostrarSubtitulos(!mostrarSubtitulos),
+          },
           {
             label: "Título del artículo",
             active: mostrarTitulo,
@@ -287,6 +292,7 @@ export default function Home() {
     if (voiceConfig.voz) body.voz = voiceConfig.voz;
     if (marca.trim()) body.marca = marca.trim();
     body.mostrar_titulo = mostrarTitulo;
+    body.mostrar_subtitulos = mostrarSubtitulos;
     if (textoPersonalizadoEnabled && textoPersonalizado.trim())
       body.texto_personalizado = textoPersonalizado.trim();
 
@@ -661,6 +667,14 @@ export default function Home() {
             {/* ── Texto visible en el video ─────────────────────────────── */}
             <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>Texto en el video</p>
+
+              {/* Subtítulos karaoke */}
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 8 }}>
+                <Toggle value={mostrarSubtitulos} onChange={setMostrarSubtitulos} />
+                <span style={{ fontSize: 13, color: mostrarSubtitulos ? "var(--text)" : "var(--muted)" }}>
+                  {mostrarSubtitulos ? "Subtítulos karaoke activados" : "Sin subtítulos"}
+                </span>
+              </label>
 
               {/* Título del artículo */}
               <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 8 }}>
