@@ -338,7 +338,8 @@ def _clips_subtitulos_sincronizados(segmentos_ventana: list, offset: float, dura
 def _escribir_reel_desde_segmento(clip_original, highlight: dict,
                                    datos: dict, ruta_video: str,
                                    duracion_maxima: int, preset: str,
-                                   fps: int) -> dict:
+                                   fps: int,
+                                   mostrar_subtitulos: bool = True) -> dict:
     """
     Genera y escribe un reel vertical a partir de un VideoFileClip ya abierto
     y un highlight detectado. No cierra clip_original (el llamador lo gestiona).
@@ -361,10 +362,13 @@ def _escribir_reel_desde_segmento(clip_original, highlight: dict,
     )
     titulo_clip = ImageClip(np.array(titulo_img)).set_duration(duracion_clip)
 
-    print("   -> Generando subtitulos sincronizados con el video real...")
-    clips_subs = _clips_subtitulos_sincronizados(
-        highlight["segmentos"], offset=inicio_real, duracion_clip=duracion_clip
-    )
+    if mostrar_subtitulos:
+        print("   -> Generando subtitulos sincronizados con el video real...")
+        clips_subs = _clips_subtitulos_sincronizados(
+            highlight["segmentos"], offset=inicio_real, duracion_clip=duracion_clip
+        )
+    else:
+        clips_subs = []
 
     video_final = None
     try:
@@ -384,10 +388,12 @@ def _escribir_reel_desde_segmento(clip_original, highlight: dict,
             temp_audiofile=temp_audio, remove_temp=True,
         )
     finally:
-        for c in (video_final, subclip):
+        # Cerrar solo video_final; subclip es una vista de clip_original y lo
+        # gestiona el llamador — cerrarlo aquí libera el lector de audio compartido
+        # y rompe los shorts siguientes con 'NoneType has no attribute stdout'.
+        if video_final is not None:
             try:
-                if c is not None:
-                    c.close()
+                video_final.close()
             except Exception:
                 pass
 
@@ -447,7 +453,8 @@ def generar_reel_desde_clip(datos_youtube: dict, carpeta_salida: str, slug: str,
                              ruta_video_local: str = None,
                              cookies_browser: str = None,
                              preset: str = "medium", fps: int = 30,
-                             auto_segmento: bool = True) -> dict:  # True = detecta mejor tramo (comportamiento original)
+                             auto_segmento: bool = True,
+                             mostrar_subtitulos: bool = True) -> dict:
     """
     Genera el reel recortando el video (YouTube o archivo local).
 
@@ -498,7 +505,7 @@ def generar_reel_desde_clip(datos_youtube: dict, carpeta_salida: str, slug: str,
         clip_original = VideoFileClip(ruta_origen)
         resultado = _escribir_reel_desde_segmento(
             clip_original, highlight, datos_youtube, ruta_video,
-            duracion_maxima, preset, fps,
+            duracion_maxima, preset, fps, mostrar_subtitulos=mostrar_subtitulos,
         )
     finally:
         try:
@@ -524,7 +531,8 @@ def generar_multiples_reels_desde_clip(datos: dict, carpeta_salida: str,
                                         cookies_browser: str = None,
                                         preset: str = "medium",
                                         fps: int = 30,
-                                        auto_segmento: bool = True) -> list:
+                                        auto_segmento: bool = True,
+                                        mostrar_subtitulos: bool = True) -> list:
     """
     Genera N shorts a partir de un video.
 
@@ -595,6 +603,7 @@ def generar_multiples_reels_desde_clip(datos: dict, carpeta_salida: str,
             resultado = _escribir_reel_desde_segmento(
                 clip_original, highlight, datos, ruta_video,
                 duracion_maxima, preset, fps,
+                mostrar_subtitulos=mostrar_subtitulos,
             )
             resultados.append(resultado)
             print(f"   -> Guardado: {ruta_video}")

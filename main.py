@@ -352,7 +352,8 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                      duracion_maxima: int = 60, modo: str = "clip",
                      cantidad_shorts: int = 1,
                      cookies_browser: str = None,
-                     auto_segmento: bool = True) -> list:
+                     auto_segmento: bool = True,
+                     mostrar_subtitulos: bool = True) -> list:
     """
     Genera uno o varios reels a partir de un video de YouTube.
 
@@ -396,12 +397,14 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                     n=cantidad_shorts, duracion_maxima=duracion_maxima,
                     cookies_browser=cookies_browser,
                     auto_segmento=auto_segmento,
+                    mostrar_subtitulos=mostrar_subtitulos,
                 )
             else:
                 r = generar_reel_desde_clip(
                     datos, carpeta_salida, slug, duracion_maxima=duracion_maxima,
                     cookies_browser=cookies_browser,
                     auto_segmento=auto_segmento,
+                    mostrar_subtitulos=mostrar_subtitulos,
                 )
                 resultados = [r]
 
@@ -914,6 +917,7 @@ def main():
                     cantidad_shorts=args.cantidad_shorts,
                     cookies_browser=args.cookies_browser,
                     auto_segmento=args.auto_segmento_youtube,
+                    mostrar_subtitulos=not args.sin_subtitulos,
                 )
                 generados.extend(rutas)
             except Exception:
