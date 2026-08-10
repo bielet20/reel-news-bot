@@ -352,7 +352,7 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                      duracion_maxima: int = 60, modo: str = "clip",
                      cantidad_shorts: int = 1,
                      cookies_browser: str = None,
-                     auto_segmento: bool = False) -> list:
+                     auto_segmento: bool = True) -> list:
     """
     Genera uno o varios reels a partir de un video de YouTube.
 
@@ -420,7 +420,17 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                 rutas.append(resultado["ruta_video"])
             return rutas
         except Exception as e:
-            print(f"[WARN] Modo 'clip' fallo ({e}). Usando modo 'narrado' como respaldo...")
+            print(f"[WARN] Modo 'clip' fallo ({e}). Intentando modo musica (deteccion de coro)...")
+            try:
+                ruta = procesar_musica(
+                    url,
+                    carpeta_salida=carpeta_salida,
+                    duracion_maxima=duracion_maxima,
+                    cookies_browser=cookies_browser,
+                )
+                return [ruta]
+            except Exception as e2:
+                print(f"[WARN] Modo musica tambien fallo ({e2}). Usando modo narrado como ultimo recurso...")
 
     noticia = {
         "titulo": datos["titulo"],

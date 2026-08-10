@@ -447,7 +447,7 @@ def generar_reel_desde_clip(datos_youtube: dict, carpeta_salida: str, slug: str,
                              ruta_video_local: str = None,
                              cookies_browser: str = None,
                              preset: str = "medium", fps: int = 30,
-                             auto_segmento: bool = True) -> dict:
+                             auto_segmento: bool = True) -> dict:  # True = detecta mejor tramo (comportamiento original)
     """
     Genera el reel recortando el video (YouTube o archivo local).
 

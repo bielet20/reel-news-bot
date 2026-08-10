@@ -83,7 +83,7 @@ export default function Home() {
   const [tema, setTema] = useState("");
   const [artista, setArtista] = useState("");
   const [modoYt, setModoYt] = useState("clip");
-  const [ytAutoSegmento, setYtAutoSegmento] = useState(false);
+  const [ytAutoSegmento, setYtAutoSegmento] = useState(true);
   const [musicaMostrarNombre, setMusicaMostrarNombre] = useState(false);
   const [tipoContenido, setTipoContenido] = useState<"noticia" | "curiosidad">("noticia");
   const [subirYoutube, setSubirYoutube] = useState(false);
