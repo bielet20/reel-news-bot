@@ -21,6 +21,7 @@ python-multipart
 qrcode[pil]
 # Music library
 mutagen
+librosa
 # TTS opcional
 elevenlabs
 # YouTube Data API (subida automática de videos)
