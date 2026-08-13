@@ -310,11 +310,13 @@ def generar_clips(
             temp_audiofile=tmp_audio, remove_temp=True,
         )
 
-        for c in [video, audio_clip]:
-            try:
-                c.close()
-            except Exception:
-                pass
+        # Desacoplar audio antes de cerrar el video: audio_clip comparte el reader
+        # de audio_full y cerrarlo aquí mataría el proceso ffmpeg para el resto.
+        video.audio = None
+        try:
+            video.close()
+        except Exception:
+            pass
 
         print(f"[LyricVideo] {i + 1}/{len(secciones)} → {Path(ruta_out).name}")
         rutas.append(ruta_out)
