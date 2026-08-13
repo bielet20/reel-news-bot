@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import HotspotOverlay from "./HotspotOverlay";
+import PublishModal from "./PublishModal";
 
 interface VideoFile {
   filename: string;
@@ -13,6 +14,7 @@ interface VideoFile {
 export default function RecentVideos() {
   const [videos, setVideos] = useState<VideoFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -23,6 +25,8 @@ export default function RecentVideos() {
   }, []);
 
   if (videos.length === 0) return null;
+
+  const publishingVideo = publishing ? videos.find((v) => v.filename === publishing) : null;
 
   function fmt(bytes: number) {
     return (bytes / 1024 / 1024).toFixed(1) + " MB";
@@ -36,6 +40,10 @@ export default function RecentVideos() {
 
   return (
     <div className="mt-8">
+      {publishing && publishingVideo && (
+        <PublishModal filename={publishing} onClose={() => setPublishing(null)} />
+      )}
+
       <h2 className="text-lg font-semibold mb-4" style={{ color: "var(--text)" }}>
         Videos generados
       </h2>
@@ -93,6 +101,13 @@ export default function RecentVideos() {
               </div>
             </div>
             <div className="flex gap-2 ml-3 shrink-0">
+              <button
+                onClick={(e) => { e.stopPropagation(); setPublishing(v.filename); }}
+                className="text-xs px-3 py-1.5 rounded-lg"
+                style={{ background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer", fontWeight: 600 }}
+              >
+                ↑ Publicar
+              </button>
               <Link
                 href={`/hotspot-editor/${encodeURIComponent(v.filename)}`}
                 onClick={(e) => e.stopPropagation()}

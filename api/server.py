@@ -40,10 +40,14 @@ from api.hotspots import router as hotspots_router
 from api.library import router as library_router, LIBRARY_DIR
 from api.templates import router as templates_router
 from api.music import router as music_router, MUSIC_DIR
+from api.accounts import router as accounts_router
+from api.publish import router as publish_router
 app.include_router(hotspots_router)
 app.include_router(library_router)
 app.include_router(templates_router)
 app.include_router(music_router)
+app.include_router(accounts_router)
+app.include_router(publish_router)
 
 app.add_middleware(
     CORSMiddleware,
