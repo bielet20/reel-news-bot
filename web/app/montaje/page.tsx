@@ -67,7 +67,11 @@ export default function MontajePage() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch("/api/music-clip/upload-audio", { method: "POST", body: fd });
+      // Upload directo al backend para evitar el límite de body del proxy Next.js
+      const backendUrl = typeof window !== "undefined"
+        ? `${window.location.protocol}//${window.location.hostname}:8000`
+        : "http://localhost:8000";
+      const res = await fetch(`${backendUrl}/api/music-clip/upload-audio`, { method: "POST", body: fd });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setAudioPath(data.path);
