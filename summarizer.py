@@ -282,6 +282,26 @@ def _llamar_ollama(prompt: str, model: str = "llama3.2") -> str:
     return data["response"].strip()
 
 
+def _llamar_lmstudio(prompt: str, model: str) -> str:
+    """Llama a un modelo cargado en LM Studio via su API compatible con OpenAI.
+    Sin API, sin coste, sin internet. Requiere el servidor local de LM Studio
+    corriendo (Developer > Start Server, o `lms server start`)."""
+    import json
+    import urllib.request
+    url = "http://localhost:1234/v1/chat/completions"
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 900,
+    }).encode()
+    req = urllib.request.Request(url, data=body,
+                                  headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read())
+    return data["choices"][0]["message"]["content"].strip()
+
+
 def _llamar_gemini(prompt: str, api_key: str) -> str:
     """Llama a Gemini 2.0 Flash via HTTP. Gratis hasta 1500 peticiones/dia."""
     import json
@@ -340,10 +360,12 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
     """
     Genera el guion usando IA. Orden de prioridad:
       1. Ollama (local, sin API, sin coste, sin internet)
-      2. Claude (ANTHROPIC_API_KEY) — de pago
-      3. Gemini 2.0 Flash (GEMINI_API_KEY) — gratis hasta 1500 req/dia
-      4. Groq Llama 3.3 70B (GROQ_API_KEY) — gratis hasta 14400 req/dia
-      5. Resumen extractivo — siempre disponible, sin IA
+      2. LM Studio (local, sin API, sin coste, sin internet; usa el modelo
+         cargado en el servidor local, LMSTUDIO_MODEL o "qwen/qwen3-8b")
+      3. Claude (ANTHROPIC_API_KEY) — de pago
+      4. Gemini 2.0 Flash (GEMINI_API_KEY) — gratis hasta 1500 req/dia
+      5. Groq Llama 3.3 70B (GROQ_API_KEY) — gratis hasta 14400 req/dia
+      6. Resumen extractivo — siempre disponible, sin IA
 
     tipo: "video" para transcripciones de YouTube, "articulo" para noticias.
     """
@@ -392,6 +414,21 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
         raise
     except Exception as e:
         print(f"[WARN] Ollama no disponible: {e}")
+
+    # --- Intentar LM Studio (local, sin coste) ---
+    lmstudio_model = os.environ.get("LMSTUDIO_MODEL", "qwen/qwen3-8b")
+    try:
+        print(f"   -> Usando LM Studio ({lmstudio_model}, local)...")
+        guion_texto = _validar_guion(_llamar_lmstudio(prompt, lmstudio_model))
+        guion_texto = _recortar_a_palabras(guion_texto, max_palabras_total)
+        n = len(guion_texto.split())
+        return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
+                "cierre": "", "guion": guion_texto, "palabras": n,
+                "duracion_estimada_seg": round(n / 2.5, 1)}
+    except ValueError:
+        raise
+    except Exception as e:
+        print(f"[WARN] LM Studio no disponible: {e}")
 
     # --- Intentar Claude ---
     claude_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -464,7 +501,9 @@ def _prompt_video(titulo: str, fuente: str, transcripcion: str, max_palabras: in
         f"- PUNTOS CLAVE: 2-3 ideas centrales que se explican en el video\n"
         f"- CIERRE: llamada a la accion breve\n\n"
         f"IMPORTANTE: los puntos clave deben reflejar lo que realmente se habla en "
-        f"el video, no suposiciones generales sobre el tema.\n"
+        f"el video, no suposiciones generales sobre el tema. Usa SOLO datos y cifras "
+        f"que aparecen explicitamente en la transcripcion; no inventes ni agregues "
+        f"estadisticas o comparaciones que no esten presentes en el texto original.\n"
         f"Tono: dinamico, conversacional. "
         f"Devuelve SOLO el texto del guion, sin encabezados ni explicaciones."
     )
