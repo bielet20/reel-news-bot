@@ -5,6 +5,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # ffmpeg + librerías para OpenCV y moviepy + curl (usado por el healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     ffmpeg \
     curl \
     libgl1 \
@@ -14,6 +15,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender-dev \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
+
+# CAs locales extra (opcional): si en el equipo de build hay un antivirus o
+# proxy que hace inspeccion TLS, se puede dejar el certificado en certs/ para
+# que pip confie en el. Vacio por defecto, no afecta a otros equipos.
+COPY certs/ /usr/local/share/ca-certificates/extra/
+RUN update-ca-certificates
+# pip/requests usan el bundle de certifi por defecto, no el del sistema:
+# forzamos que tambien usen el del sistema (ya actualizado).
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 

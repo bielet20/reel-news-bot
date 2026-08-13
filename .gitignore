@@ -47,5 +47,11 @@ _imgs_*/
 vendor/sadtalker/checkpoints/
 vendor/sadtalker/venv/
 
+# Certificados CA locales (p.ej. si un antivirus/proxy hace inspeccion TLS
+# y hace falta inyectarlo en el build de Docker). Especifico de cada equipo,
+# no se sube al repo.
+certs/*
+!certs/.gitkeep
+
 # macOS
 .DS_Store

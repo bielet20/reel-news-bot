@@ -40,6 +40,10 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        # Ver web/Dockerfile: ruta a un CA extra opcional (antivirus/proxy
+        # con inspeccion TLS). Vacio si no se define EXTRA_CA_CERT en .env.
+        - EXTRA_CA_CERT=${EXTRA_CA_CERT:-}
     ports:
       - "3000:3000"
     volumes:
@@ -49,6 +53,7 @@ services:
       - frontend_modules:/app/node_modules
     environment:
       - BACKEND_URL=http://backend:8000
+      - NODE_EXTRA_CA_CERTS=${EXTRA_CA_CERT:-}
     depends_on:
       - backend
     restart: unless-stopped

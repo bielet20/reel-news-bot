@@ -3,6 +3,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# CA local extra (opcional, ver web/Dockerfile para el porque)
+COPY certs/ /app/certs/
+ARG EXTRA_CA_CERT=
+ENV NODE_EXTRA_CA_CERTS=${EXTRA_CA_CERT}
+
 COPY package*.json ./
 RUN npm ci
 
