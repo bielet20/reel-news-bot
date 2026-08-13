@@ -17,6 +17,7 @@ como ImageClip, lo cual es mas portable.
 import io
 import os
 import random
+import tempfile
 import textwrap
 
 import numpy as np
@@ -605,7 +606,7 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
     # montadas (p.ej. la carpeta de outputs de Cowork) no permiten borrar archivos,
     # y moviepy necesita poder borrar su temp de audio tras el mux final.
     temp_audio = os.path.join(
-        "/tmp", f"_tmp_audio_{os.getpid()}_{os.path.basename(ruta_salida)}.m4a"
+        tempfile.gettempdir(), f"_tmp_audio_{os.getpid()}_{os.path.basename(ruta_salida)}.m4a"
     )
     video_final.write_videofile(
         ruta_salida, fps=fps, codec="libx264", audio_codec="aac",

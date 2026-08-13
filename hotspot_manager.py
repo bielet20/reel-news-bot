@@ -327,7 +327,8 @@ def burn_hotspots(filename: str, output_filename: Optional[str] = None) -> str:
     final = final.set_audio(video.audio)
 
     import os
-    temp_audio = f"/tmp/_burn_audio_{os.getpid()}.m4a"
+    import tempfile
+    temp_audio = os.path.join(tempfile.gettempdir(), f"_burn_audio_{os.getpid()}.m4a")
     final.write_videofile(
         str(out_path),
         codec="libx264", audio_codec="aac",

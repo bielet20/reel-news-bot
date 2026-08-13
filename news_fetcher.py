@@ -385,11 +385,16 @@ def buscar_noticias(tema: str, idioma: str = "es-419", pais: str = "US",
     noticias = []
     for entry in feed.entries[:max_resultados * 3]:  # fetch extra to allow filtering
         fuente = ""
+        fuente_url = ""
         if hasattr(entry, "source") and hasattr(entry.source, "title"):
             fuente = entry.source.title
+        if hasattr(entry, "source") and hasattr(entry.source, "href"):
+            fuente_url = entry.source.href
 
         link = entry.link
-        verificada = _es_dominio_confiable(link)
+        # entry.link es siempre un redirect de news.google.com; el dominio
+        # real del medio viene en entry.source.href.
+        verificada = _es_dominio_confiable(fuente_url or link)
 
         if solo_confiables and not verificada:
             continue

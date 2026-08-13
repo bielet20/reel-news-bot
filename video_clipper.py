@@ -380,7 +380,7 @@ def _escribir_reel_desde_segmento(clip_original, highlight: dict,
         os.makedirs(os.path.dirname(ruta_video) or ".", exist_ok=True)
         slug_tmp = re.sub(r"[^a-z0-9]", "_", os.path.basename(ruta_video))[:30]
         temp_audio = os.path.join(
-            "/tmp", f"_tmp_audio_{os.getpid()}_{slug_tmp}.m4a"
+            tempfile.gettempdir(), f"_tmp_audio_{os.getpid()}_{slug_tmp}.m4a"
         )
         video_final.write_videofile(
             ruta_video, fps=fps, codec="libx264", audio_codec="aac",

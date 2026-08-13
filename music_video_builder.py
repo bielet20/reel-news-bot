@@ -11,6 +11,7 @@ Dos modos segun la fuente:
 
 import os
 import re
+import tempfile
 
 import numpy as np
 from PIL import Image
@@ -214,7 +215,7 @@ def construir_reel_musical_desde_audio(ruta_audio: str, inicio: float, fin: floa
 def _escribir_video(video_final, ruta_salida: str, preset: str, fps: int):
     os.makedirs(os.path.dirname(ruta_salida) or ".", exist_ok=True)
     slug_tmp = re.sub(r"[^a-z0-9]", "_", os.path.basename(ruta_salida))[:30]
-    temp_audio = os.path.join("/tmp", f"_tmp_mus_{os.getpid()}_{slug_tmp}.m4a")
+    temp_audio = os.path.join(tempfile.gettempdir(), f"_tmp_mus_{os.getpid()}_{slug_tmp}.m4a")
     video_final.write_videofile(
         ruta_salida, fps=fps, codec="libx264", audio_codec="aac",
         preset=preset, threads=4, logger=None,
