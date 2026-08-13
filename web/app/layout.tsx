@@ -33,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             🎬 Reel News Bot
           </Link>
           <NavLink href="/">Generar</NavLink>
+          <NavLink href="/montaje">Montaje</NavLink>
           <NavLink href="/canales">Canales</NavLink>
           <NavLink href="/library">Biblioteca</NavLink>
           <NavLink href="/music">Música</NavLink>
