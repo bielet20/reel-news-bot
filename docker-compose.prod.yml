@@ -16,7 +16,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.cpu
     ports:
       - "8000:8000"
     env_file:
@@ -29,13 +29,6 @@ services:
       - ./_templates:/app/_templates
       - ./vendor/sadtalker/checkpoints:/app/vendor/sadtalker/checkpoints
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/tts/status"]
       interval: 30s

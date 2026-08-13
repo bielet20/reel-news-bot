@@ -3,9 +3,10 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# ffmpeg + librerías para OpenCV y moviepy
+# ffmpeg + librerías para OpenCV y moviepy + curl (usado por el healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    curl \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
