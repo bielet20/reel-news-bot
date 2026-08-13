@@ -19,6 +19,9 @@ _library/
 _music/
 _templates/
 
+# Tokens OAuth de redes sociales (no subir a GitHub)
+_tokens/
+
 # Python
 __pycache__/
 *.py[cod]

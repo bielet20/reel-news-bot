@@ -1,18 +1,23 @@
+# docker-compose para equipos SIN GPU (CPU only).
+# Uso:
+#   docker compose -f docker-compose.cpu.yml up --build
+#
+# Primera vez en un equipo nuevo:
+#   1. Copia tu .env (o crea uno a partir de .env.example)
+#   2. Copia la carpeta _tokens/ si ya tienes cuentas vinculadas
+#   3. docker compose -f docker-compose.cpu.yml up --build
+
 services:
 
   # ── Backend FastAPI ────────────────────────────────────────────────────────
   backend:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.cpu
     ports:
       - "8000:8000"
     volumes:
-      # Código fuente montado para hot-reload sin rebuild
-      - .:/app
-      # Checkpoints de SadTalker (~1.5 GB, montar desde host)
-      - ./vendor/sadtalker/checkpoints:/app/vendor/sadtalker/checkpoints
-      # Datos persistentes
+      # Datos persistentes (los videos generados, tokens, biblioteca, etc.)
       - ./output:/app/output
       - ./_library:/app/_library
       - ./_music:/app/_music
@@ -22,18 +27,7 @@ services:
       - ./assets:/app/assets
     env_file:
       - .env
-    environment:
-      # Apunta al venv CUDA construido en la imagen (fuera de /app)
-      - SADTALKER_VENV=/opt/sadtalker_venv
     restart: unless-stopped
-    # Acceso a la GPU NVIDIA (requiere NVIDIA Container Toolkit)
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   # ── Frontend Next.js ───────────────────────────────────────────────────────
   frontend:
@@ -43,7 +37,6 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # Código fuente para hot-reload
       - ./web:/app
       # node_modules construidos en Linux (no usar los del host Mac/Win)
       - frontend_modules:/app/node_modules
@@ -54,5 +47,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  # node_modules de Linux (independiente del SO del host)
   frontend_modules:
