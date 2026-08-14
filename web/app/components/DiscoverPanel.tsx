@@ -34,6 +34,21 @@ interface BatchItem {
   errorMsg?: string;
 }
 
+interface IndexedArticle {
+  id: string;
+  url: string;
+  title: string;
+  source: string;
+  summary: string;
+  content: string;
+  category: string;
+  score: number;
+  indexed_at: string;
+  word_count: number;
+  used_count: number;
+  snippet?: string;
+}
+
 
 // Solo afecta el idioma/edición de Google News para búsquedas por tema
 // Las fuentes RSS verificadas son siempre globales (Reuters, BBC, AP, DW, Al Jazeera…)
@@ -105,10 +120,29 @@ export default function DiscoverPanel({ onUsar }: Props) {
   // Carga localStorage solo en el cliente (después de la hidratación)
   useEffect(() => {
     setSavedNews(cargarGuardadas());
+    // Cargar URLs indexadas para mostrar indicadores en las tarjetas
+    fetch("/api/articles/?limit=200")
+      .then((r) => r.ok ? r.json() : { articles: [] })
+      .then((d) => {
+        const urls = new Set<string>((d.articles || []).map((a: IndexedArticle) => a.url));
+        setIndexedUrls(urls);
+        setIndexList(d.articles || []);
+      })
+      .catch(() => {});
   }, []);
   const [selectedLinks, setSelectedLinks] = useState<Set<string>>(new Set());
   const [batchQueue, setBatchQueue] = useState<BatchItem[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
+
+  // ── Índice de artículos ────────────────────────────────────────────────
+  const [indexedUrls, setIndexedUrls] = useState<Set<string>>(new Set());
+  const [indexing, setIndexing] = useState<Set<string>>(new Set());
+  const [showIndex, setShowIndex] = useState(false);
+  const [indexQuery, setIndexQuery] = useState("");
+  const [indexResults, setIndexResults] = useState<IndexedArticle[]>([]);
+  const [indexList, setIndexList] = useState<IndexedArticle[]>([]);
+  const [indexLoading, setIndexLoading] = useState(false);
+  const [indexSearched, setIndexSearched] = useState(false);
 
   // ── Selección para lote ────────────────────────────────────────────────
 
@@ -287,6 +321,80 @@ export default function DiscoverPanel({ onUsar }: Props) {
     }
 
     setBatchRunning(false);
+  }
+
+  // ── Funciones del índice ───────────────────────────────────────────────
+
+  async function handleIndexar(n: NoticiaProuesta) {
+    if (indexing.has(n.link)) return;
+    setIndexing((prev) => new Set(prev).add(n.link));
+    try {
+      const res = await fetch("/api/articles/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: n.link,
+          title: n.titulo_original || n.titulo,
+          source: n.fuente || "",
+          category: n.categoria || "general",
+          score: n.score || 0,
+          summary: n.resumen ? n.resumen.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "",
+        }),
+      });
+      if (res.ok) {
+        const art: IndexedArticle = await res.json();
+        setIndexedUrls((prev) => new Set(prev).add(n.link));
+        setIndexList((prev) => {
+          const filtered = prev.filter((a) => a.url !== n.link);
+          return [art, ...filtered];
+        });
+      }
+    } catch { /* silencioso */ } finally {
+      setIndexing((prev) => { const next = new Set(prev); next.delete(n.link); return next; });
+    }
+  }
+
+  async function handleSearchIndex() {
+    if (!indexQuery.trim() || indexQuery.trim().length < 2) return;
+    setIndexLoading(true);
+    setIndexSearched(true);
+    try {
+      const res = await fetch(`/api/articles/search?q=${encodeURIComponent(indexQuery.trim())}&limit=20`);
+      if (res.ok) {
+        const d = await res.json();
+        setIndexResults(d.results || []);
+      }
+    } catch { /* silencioso */ } finally {
+      setIndexLoading(false);
+    }
+  }
+
+  async function handleDeleteFromIndex(id: string, url: string) {
+    try {
+      await fetch(`/api/articles/${id}`, { method: "DELETE" });
+      setIndexList((prev) => prev.filter((a) => a.id !== id));
+      setIndexResults((prev) => prev.filter((a) => a.id !== id));
+      setIndexedUrls((prev) => { const next = new Set(prev); next.delete(url); return next; });
+    } catch { /* silencioso */ }
+  }
+
+  function usarArticuloIndexado(art: IndexedArticle) {
+    // Truncar a ~3500 chars para que quepa en un short (~60s de narración)
+    const contenidoCorto = art.content.length > 3500
+      ? art.content.slice(0, 3497) + "…"
+      : art.content;
+    const noticia: NoticiaProuesta = {
+      titulo: art.title,
+      titulo_original: art.title,
+      fuente: art.source,
+      link: art.url,
+      resumen: contenidoCorto || art.summary,
+      score: art.score,
+      categoria: art.category,
+      gancho: "",
+      audiencia: "",
+    };
+    onUsar(noticia);
   }
 
   function isGuardada(link: string) {
@@ -610,6 +718,19 @@ export default function DiscoverPanel({ onUsar }: Props) {
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
+                          onClick={() => handleIndexar(n)}
+                          title="Indexar artículo completo"
+                          className="px-2 py-1 rounded-lg text-xs"
+                          style={{
+                            background: indexedUrls.has(n.link) ? "#1e2a4a" : "var(--surface2)",
+                            color: indexedUrls.has(n.link) ? "#60a5fa" : "var(--muted)",
+                            border: `1px solid ${indexedUrls.has(n.link) ? "#3b82f640" : "var(--border)"}`,
+                          }}
+                        >
+                          {indexing.has(n.link) ? "⟳" : indexedUrls.has(n.link) ? "📚✓" : "📚"}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => onUsar(n)}
                           className="px-2.5 py-1 rounded-lg text-xs font-semibold"
                           style={{ background: "var(--accent)", color: "#fff" }}
@@ -634,6 +755,135 @@ export default function DiscoverPanel({ onUsar }: Props) {
           )}
         </div>
       )}
+
+      {/* ── Índice de artículos ────────────────────────────────────────────── */}
+      <div className="rounded-xl overflow-hidden"
+        style={{ border: "1px solid #3b82f630", background: "var(--surface)" }}>
+
+        {/* Header colapsable */}
+        <button
+          type="button"
+          onClick={() => setShowIndex((v) => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold"
+          style={{ color: "#60a5fa", background: "#0d1a2e" }}
+        >
+          <span>📚 Índice de artículos ({indexList.length})</span>
+          <span style={{ fontSize: "0.7rem", opacity: 0.7 }}>
+            {showIndex ? "▲ ocultar" : "▼ explorar y buscar"}
+          </span>
+        </button>
+
+        {showIndex && (
+          <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+            {/* Barra de búsqueda */}
+            <div className="px-4 py-3 flex gap-2"
+              style={{ background: "#111827" }}>
+              <input
+                type="text"
+                value={indexQuery}
+                onChange={(e) => setIndexQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearchIndex()}
+                placeholder="Buscar en artículos indexados…"
+                className="flex-1 rounded-lg px-3 py-2 text-sm"
+                style={{ background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)", outline: "none" }}
+              />
+              <button
+                type="button"
+                onClick={handleSearchIndex}
+                disabled={indexLoading || indexQuery.trim().length < 2}
+                className="px-3 py-2 rounded-lg text-xs font-semibold"
+                style={{
+                  background: indexLoading ? "var(--surface2)" : "#1e40af",
+                  color: indexLoading ? "var(--muted)" : "#fff",
+                  cursor: indexLoading || indexQuery.trim().length < 2 ? "not-allowed" : "pointer",
+                }}
+              >
+                {indexLoading ? "⟳" : "Buscar"}
+              </button>
+              {indexSearched && (
+                <button
+                  type="button"
+                  onClick={() => { setIndexQuery(""); setIndexSearched(false); setIndexResults([]); }}
+                  className="px-3 py-2 rounded-lg text-xs"
+                  style={{ background: "var(--surface2)", color: "var(--muted)" }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Resultados de búsqueda o lista reciente */}
+            {(() => {
+              const lista = indexSearched ? indexResults : indexList;
+              if (lista.length === 0) {
+                return (
+                  <p className="text-xs text-center py-6" style={{ color: "var(--muted)" }}>
+                    {indexSearched
+                      ? "Sin resultados. Prueba con otro término."
+                      : "Aún no hay artículos indexados. Pulsa 📚 en cualquier noticia para indexarla."}
+                  </p>
+                );
+              }
+              return lista.map((art) => (
+                <div key={art.id} className="px-4 py-3 flex items-start gap-3"
+                  style={{ background: "transparent" }}>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <p className="text-xs font-medium leading-snug" style={{ color: "var(--text)" }}>
+                      {art.title}
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {art.source && (
+                        <span className="text-xs" style={{ color: "var(--muted)" }}>
+                          {art.source}
+                        </span>
+                      )}
+                      {art.category && art.category !== "general" && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full"
+                          style={{ background: "var(--surface2)", color: "var(--muted)" }}>
+                          {CATEGORIAS[art.category] ?? "📰"} {art.category}
+                        </span>
+                      )}
+                      <span className="text-xs" style={{ color: "var(--muted)", opacity: 0.6 }}>
+                        {art.word_count > 0 ? `${art.word_count} palabras` : ""}
+                      </span>
+                    </div>
+                    {/* Snippet de búsqueda si existe */}
+                    {art.snippet && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}
+                        dangerouslySetInnerHTML={{ __html: art.snippet.replace(/<mark>/g, '<mark style="background:#2d4a22;color:#86efac;border-radius:2px;padding:0 2px">') }} />
+                    )}
+                    {/* Resumen si no hay snippet */}
+                    {!art.snippet && art.summary && (
+                      <p className="text-xs line-clamp-2" style={{ color: "var(--muted)" }}>
+                        {art.summary}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => usarArticuloIndexado(art)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+                      style={{ background: "var(--accent)", color: "#fff" }}
+                    >
+                      Usar →
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteFromIndex(art.id, art.url)}
+                      title="Eliminar del índice"
+                      className="px-2 py-1 rounded-lg text-xs"
+                      style={{ background: "var(--surface2)", color: "var(--muted)", border: "1px solid var(--border)" }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+      </div>
 
       {noticias.length > 0 && (
         <div className="space-y-3">
@@ -687,6 +937,20 @@ export default function DiscoverPanel({ onUsar }: Props) {
                       }}
                     >
                       {isGuardada(n.link) ? "✓ Guardada" : "💾"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleIndexar(n)}
+                      title="Leer artículo completo e indexar para futuras búsquedas"
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                      style={{
+                        background: indexedUrls.has(n.link) ? "#1e2a4a" : "var(--surface2)",
+                        color: indexedUrls.has(n.link) ? "#60a5fa" : "var(--muted)",
+                        border: `1px solid ${indexedUrls.has(n.link) ? "#3b82f640" : "var(--border)"}`,
+                        opacity: indexing.has(n.link) ? 0.6 : 1,
+                      }}
+                    >
+                      {indexing.has(n.link) ? "⟳" : indexedUrls.has(n.link) ? "📚✓" : "📚"}
                     </button>
                     <button
                       type="button"

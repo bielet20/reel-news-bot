@@ -43,6 +43,7 @@ from api.music import router as music_router, MUSIC_DIR
 from api.accounts import router as accounts_router
 from api.publish import router as publish_router
 from api.music_clip import router as music_clip_router
+from api.article_index import router as article_index_router
 app.include_router(hotspots_router)
 app.include_router(library_router)
 app.include_router(templates_router)
@@ -50,6 +51,7 @@ app.include_router(music_router)
 app.include_router(accounts_router)
 app.include_router(publish_router)
 app.include_router(music_clip_router)
+app.include_router(article_index_router)
 
 app.add_middleware(
     CORSMiddleware,

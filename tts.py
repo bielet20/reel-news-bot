@@ -5,12 +5,18 @@ Convierte el guion en audio narrado.
 Motores disponibles (por prioridad):
   1. ElevenLabs (si ELEVENLABS_API_KEY esta en .env) — voces premium, multilingue.
   2. edge-tts (voces neuronales de Microsoft Edge, gratis, sin API key).
-  3. gTTS (Google Text-to-Speech, gratis).
-  4. pyttsx3 (motor offline del sistema).
+  3. XTTS v2 local (si TTS instalado + GPU) — gratis, sin internet.
+  4. gTTS (Google Text-to-Speech, gratis).
+  5. pyttsx3 (motor offline del sistema).
+
+El texto pasa automáticamente por pronunciation_manager antes de enviarse al TTS.
+La configuración de voz se carga de voice_settings.json si existe.
 """
 
 import asyncio
+import json
 import os
+from pathlib import Path
 
 from moviepy.editor import AudioFileClip
 
@@ -44,21 +50,58 @@ def _generar_audio_edge_tts(texto: str, ruta_salida: str, voz: str) -> str:
     return ruta_salida
 
 
+def _load_voice_settings() -> dict:
+    """Carga la configuración de voz desde voice_settings.json si existe."""
+    settings_path = Path(__file__).parent / "voice_settings.json"
+    if settings_path.exists():
+        with open(settings_path, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
 def _generar_audio_elevenlabs(texto: str, ruta_salida: str, voice_id: str,
-                               model_id: str = "eleven_multilingual_v2") -> str:
+                               model_id: str = None,
+                               voice_settings: dict = None) -> str:
     from elevenlabs.client import ElevenLabs
+    from elevenlabs import VoiceSettings
 
     api_key = os.environ.get("ELEVENLABS_API_KEY")
     if not api_key:
         raise RuntimeError("Falta ELEVENLABS_API_KEY en las variables de entorno")
 
+    # Cargar configuración guardada (voice_lab.py --settings)
+    saved = _load_voice_settings()
+    el_cfg = {**saved.get("elevenlabs_settings", {}), **(voice_settings or {})}
+    if not model_id:
+        model_id = saved.get("model", "eleven_multilingual_v2")
+
     client = ElevenLabs(api_key=api_key)
-    audio_gen = client.text_to_speech.convert(
+
+    kwargs = dict(
         voice_id=voice_id,
         text=texto,
         model_id=model_id,
         output_format="mp3_44100_128",
     )
+
+    # Aplicar VoiceSettings si hay configuración personalizada
+    if el_cfg:
+        kwargs["voice_settings"] = VoiceSettings(
+            stability=float(el_cfg.get("stability", 0.5)),
+            similarity_boost=float(el_cfg.get("similarity_boost", 0.75)),
+            style=float(el_cfg.get("style", 0.0)),
+            use_speaker_boost=bool(el_cfg.get("use_speaker_boost", True)),
+            speed=float(el_cfg.get("speed", 1.0)),
+        )
+
+    # Aplicar diccionario de pronunciación ElevenLabs si está configurado
+    dict_id = os.environ.get("ELEVENLABS_PRONUNCIATION_DICT_ID")
+    if dict_id:
+        kwargs["pronunciation_dictionary_locators"] = [
+            {"pronunciation_dictionary_id": dict_id, "version_id": "latest"}
+        ]
+
+    audio_gen = client.text_to_speech.convert(**kwargs)
     with open(ruta_salida, "wb") as f:
         for chunk in audio_gen:
             if chunk:
@@ -66,6 +109,36 @@ def _generar_audio_elevenlabs(texto: str, ruta_salida: str, voice_id: str,
 
     if not os.path.isfile(ruta_salida) or os.path.getsize(ruta_salida) == 0:
         raise RuntimeError("ElevenLabs genero un archivo vacio")
+    return ruta_salida
+
+
+def _generar_audio_xtts_local(texto: str, ruta_salida: str,
+                               reference_wav: str = None, language: str = "es") -> str:
+    """Motor XTTS v2 local (GPU). Gratis, sin internet. Requiere: pip install TTS"""
+    try:
+        from TTS.api import TTS
+        import torch
+    except ImportError:
+        raise RuntimeError("Instala TTS para usar motor local: pip install TTS")
+
+    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
+
+    # Cargar modelo (se cachea tras la primera descarga)
+    tts_engine = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+
+    ref = reference_wav or str(Path(__file__).parent / "_voice_samples" / "reference_voice.wav")
+    out_wav = ruta_salida.replace(".mp3", ".wav")
+
+    if Path(ref).exists():
+        tts_engine.tts_to_file(text=texto, speaker_wav=ref, language=language, file_path=out_wav)
+    else:
+        tts_engine.tts_to_file(text=texto, language=language, file_path=out_wav)
+
+    # Convertir WAV → MP3
+    import subprocess
+    subprocess.run(["ffmpeg", "-y", "-i", out_wav, "-b:a", "192k", ruta_salida],
+                   check=True, capture_output=True)
+    Path(out_wav).unlink(missing_ok=True)
     return ruta_salida
 
 
@@ -97,21 +170,60 @@ def listar_voces_elevenlabs() -> list:
 
 
 def generar_audio(texto: str, ruta_salida: str, idioma: str = "es", lento: bool = False,
-                   voz: str = None, servicio: str = "auto") -> str:
+                   voz: str = None, servicio: str = "auto",
+                   apply_pronunciation: bool = True) -> str:
     """
     Genera audio narrado. Devuelve la ruta del archivo.
 
-    servicio: "auto" | "elevenlabs" | "edge-tts"
+    servicio: "auto" | "elevenlabs" | "edge-tts" | "xtts"
       - "auto": usa ElevenLabs si hay API key, si no edge-tts.
       - "elevenlabs": fuerza ElevenLabs (falla si no hay key).
-      - "edge-tts": fuerza edge-tts.
-    voz: voice_id de ElevenLabs o nombre de voz de edge-tts.
+      - "edge-tts": fuerza edge-tts (gratis, Microsoft Azure).
+      - "xtts": motor local XTTS v2 (requiere GPU + pip install TTS).
+    voz: voice_id de ElevenLabs, nombre de voz edge-tts, o ruta WAV ref. para XTTS.
+    apply_pronunciation: aplica correcciones del diccionario antes de generar (default True).
     """
+    # Aplicar diccionario de pronunciación antes de generar
+    if apply_pronunciation:
+        try:
+            from pronunciation_manager import apply_corrections
+            texto_original = texto
+            texto = apply_corrections(texto)
+            if texto != texto_original:
+                print(f"   -> Pronunciación corregida ({sum(1 for a,b in zip(texto_original.split(), texto.split()) if a!=b)} palabras ajustadas)")
+        except ImportError:
+            pass  # pronunciation_manager no disponible, continuar sin correcciones
+
+    # Cargar voz predeterminada de voice_settings.json si no se especifica
+    if not voz:
+        saved = _load_voice_settings()
+        if servicio in ("auto", "elevenlabs") and saved.get("elevenlabs_voice_id"):
+            voz_el = saved["elevenlabs_voice_id"]
+        else:
+            voz_el = None
+        if servicio in ("auto", "edge-tts") and saved.get("edge_voice"):
+            voz_edge_saved = saved["edge_voice"]
+        else:
+            voz_edge_saved = None
+        if servicio == "auto" and saved.get("service"):
+            servicio = saved["service"]
+    else:
+        voz_el = voz if servicio not in ("edge-tts",) else None
+        voz_edge_saved = voz if servicio == "edge-tts" else None
+
     elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
     usar_elevenlabs = servicio == "elevenlabs" or (servicio == "auto" and elevenlabs_key)
 
+    # Motor XTTS local (forzado)
+    if servicio == "xtts":
+        try:
+            print("   -> Usando XTTS v2 local (GPU)...")
+            return _generar_audio_xtts_local(texto, ruta_salida, reference_wav=voz, language=idioma)
+        except Exception as e:
+            print(f"[tts] XTTS fallo ({e}), usando edge-tts...")
+
     if usar_elevenlabs:
-        voice_id = voz or os.environ.get("ELEVENLABS_VOICE_ID", VOZ_DEFAULT_ELEVENLABS)
+        voice_id = voz_el or os.environ.get("ELEVENLABS_VOICE_ID", VOZ_DEFAULT_ELEVENLABS)
         try:
             print(f"   -> Usando ElevenLabs (voice_id: {voice_id})...")
             return _generar_audio_elevenlabs(texto, ruta_salida, voice_id)
@@ -120,7 +232,7 @@ def generar_audio(texto: str, ruta_salida: str, idioma: str = "es", lento: bool 
         except Exception as e:
             print(f"[tts] ElevenLabs fallo ({e}), usando edge-tts...")
 
-    voz_edge = (voz if servicio != "elevenlabs" else None) or os.environ.get("TTS_VOICE", VOZ_DEFAULT_EDGE)
+    voz_edge = voz_edge_saved or (voz if servicio not in ("elevenlabs", "xtts") else None) or os.environ.get("TTS_VOICE", VOZ_DEFAULT_EDGE)
     try:
         print(f"   -> Usando edge-tts (voz: {voz_edge})...")
         return _generar_audio_edge_tts(texto, ruta_salida, voz_edge)

@@ -1,0 +1,206 @@
+{
+  "AI": {
+    "replacement": "inteligencia artificial",
+    "type": "text"
+  },
+  "IA": {
+    "replacement": "inteligencia artificial",
+    "type": "text"
+  },
+  "DJ": {
+    "replacement": "di-yei",
+    "type": "text"
+  },
+  "CEO": {
+    "replacement": "si-i-ou",
+    "type": "text"
+  },
+  "ChatGPT": {
+    "replacement": "chat-yi-pi-ti",
+    "type": "text"
+  },
+  "GPT": {
+    "replacement": "yi-pi-ti",
+    "type": "text"
+  },
+  "NFT": {
+    "replacement": "ene-efe-ti",
+    "type": "text"
+  },
+  "ONG": {
+    "replacement": "o-ene-gue",
+    "type": "text"
+  },
+  "UE": {
+    "replacement": "Unión Europea",
+    "type": "text"
+  },
+  "EE.UU.": {
+    "replacement": "Estados Unidos",
+    "type": "text"
+  },
+  "EEUU": {
+    "replacement": "Estados Unidos",
+    "type": "text"
+  },
+  "EUA": {
+    "replacement": "Estados Unidos",
+    "type": "text"
+  },
+  "BTC": {
+    "replacement": "bitcoin",
+    "type": "text"
+  },
+  "ETH": {
+    "replacement": "ethereum",
+    "type": "text"
+  },
+  "USD": {
+    "replacement": "dólares",
+    "type": "text"
+  },
+  "EUR": {
+    "replacement": "euros",
+    "type": "text"
+  },
+  "Elon": {
+    "replacement": "Ílon",
+    "type": "text"
+  },
+  "YouTube": {
+    "replacement": "iu-tub",
+    "type": "text"
+  },
+  "iPhone": {
+    "replacement": "ai-fon",
+    "type": "text"
+  },
+  "Apple": {
+    "replacement": "épol",
+    "type": "text"
+  },
+  "Google": {
+    "replacement": "gugol",
+    "type": "text"
+  },
+  "Netflix": {
+    "replacement": "nétflix",
+    "type": "text"
+  },
+  "Twitch": {
+    "replacement": "tuich",
+    "type": "text"
+  },
+  "WhatsApp": {
+    "replacement": "watsap",
+    "type": "text"
+  },
+  "TikTok": {
+    "replacement": "tik-tok",
+    "type": "text"
+  },
+  "Spotify": {
+    "replacement": "espotifai",
+    "type": "text"
+  },
+  "SoundCloud": {
+    "replacement": "saund-claud",
+    "type": "text"
+  },
+  "hacker": {
+    "replacement": "háker",
+    "type": "text"
+  },
+  "hackers": {
+    "replacement": "hákers",
+    "type": "text"
+  },
+  "software": {
+    "replacement": "sóftuer",
+    "type": "text"
+  },
+  "hardware": {
+    "replacement": "járduer",
+    "type": "text"
+  },
+  "streaming": {
+    "replacement": "estreaming",
+    "type": "text"
+  },
+  "bitcoin": {
+    "replacement": "bítcoin",
+    "type": "text"
+  },
+  "blockchain": {
+    "replacement": "blok-chein",
+    "type": "text"
+  },
+  "startup": {
+    "replacement": "estártap",
+    "type": "text"
+  },
+  "startups": {
+    "replacement": "estártaps",
+    "type": "text"
+  },
+  "online": {
+    "replacement": "on-lain",
+    "type": "text"
+  },
+  "offline": {
+    "replacement": "óflain",
+    "type": "text"
+  },
+  "selfie": {
+    "replacement": "sélfi",
+    "type": "text"
+  },
+  "influencer": {
+    "replacement": "influénser",
+    "type": "text"
+  },
+  "influencers": {
+    "replacement": "influénsers",
+    "type": "text"
+  },
+  "live": {
+    "replacement": "laiv",
+    "type": "text"
+  },
+  "etc.": {
+    "replacement": "etcétera",
+    "type": "text"
+  },
+  "aprox.": {
+    "replacement": "aproximadamente",
+    "type": "text"
+  },
+  "dpto.": {
+    "replacement": "departamento",
+    "type": "text"
+  },
+  "nº": {
+    "replacement": "número",
+    "type": "text"
+  },
+  "Nº": {
+    "replacement": "número",
+    "type": "text"
+  },
+  "km": {
+    "replacement": "kilómetros",
+    "type": "text"
+  },
+  "km²": {
+    "replacement": "kilómetros cuadrados",
+    "type": "text"
+  },
+  "m²": {
+    "replacement": "metros cuadrados",
+    "type": "text"
+  },
+  "kg": {
+    "replacement": "kilogramos",
+    "type": "text"
+  }
+}
