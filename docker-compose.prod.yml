@@ -30,6 +30,8 @@ services:
       - ./_templates:/app/_templates
       - ./_tokens:/app/_tokens
       - ./assets:/app/assets
+      - ./_config:/app/_config
+      - ./vendor/sadtalker/checkpoints:/app/vendor/sadtalker/checkpoints
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/tts/status"]
@@ -37,6 +39,17 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+
+  # ── WhatsApp sidecar (Node.js) ───────────────────────────────────────────────
+  whatsapp:
+    build:
+      context: ./wa_service
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - wa_auth:/app/.wwebjs_auth
+    restart: unless-stopped
 
   # ── Frontend Next.js ─────────────────────────────────────────────────────────
   frontend:
@@ -51,3 +64,6 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  wa_auth:
