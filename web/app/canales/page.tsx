@@ -8,12 +8,17 @@ interface PlatformStatus {
   canal?: string;
   display_name?: string;
   username?: string;
+  bot_username?: string;
+  chat_id?: string;
+  ready?: boolean;
 }
 
 interface AccountsStatus {
   youtube: PlatformStatus;
   tiktok: PlatformStatus;
   instagram: PlatformStatus;
+  telegram: PlatformStatus;
+  whatsapp: PlatformStatus;
 }
 
 const PLATFORMS = [
@@ -76,6 +81,14 @@ function CanalesContent() {
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "error" } | null>(null);
   const [expandedSetup, setExpandedSetup] = useState<string | null>(null);
+
+  // Telegram form state
+  const [tgToken, setTgToken] = useState("");
+  const [tgChatId, setTgChatId] = useState("");
+
+  // WhatsApp QR state
+  const [waQr, setWaQr] = useState<string | null>(null);
+  const [waQrLoading, setWaQrLoading] = useState(false);
 
   const showToast = (msg: string, type: "ok" | "error") => {
     setToast({ msg, type });
@@ -149,6 +162,67 @@ function CanalesContent() {
     }
   }
 
+  async function handleTelegramConnect() {
+    if (!tgToken.trim() || !tgChatId.trim()) {
+      showToast("Rellena el Bot Token y el Chat ID", "error");
+      return;
+    }
+    setConnecting("telegram");
+    try {
+      const res = await fetch("/api/accounts/telegram/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bot_token: tgToken.trim(), chat_id: tgChatId.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const detail = data.detail || {};
+        showToast(detail.message || "Error al conectar Telegram", "error");
+        return;
+      }
+      showToast(`✓ Telegram conectado (@${data.bot_username})`, "ok");
+      setTgToken("");
+      setTgChatId("");
+      await fetchStatus();
+    } catch {
+      showToast("Error de conexión con el servidor", "error");
+    } finally {
+      setConnecting(null);
+    }
+  }
+
+  async function handleTelegramDisconnect() {
+    setDisconnecting("telegram");
+    try {
+      await fetch("/api/accounts/telegram/disconnect", { method: "DELETE" });
+      await fetchStatus();
+      showToast("Telegram desvinculado", "ok");
+    } finally {
+      setDisconnecting(null);
+    }
+  }
+
+  async function handleWaQr() {
+    setWaQrLoading(true);
+    try {
+      const res = await fetch("/api/accounts/whatsapp/qr");
+      if (!res.ok) {
+        const data = await res.json();
+        showToast(data.detail || "QR no disponible", "error");
+        return;
+      }
+      const data = await res.json();
+      setWaQr(data.qr || null);
+    } catch {
+      showToast("No se pudo obtener el QR. ¿Está corriendo el sidecar?", "error");
+    } finally {
+      setWaQrLoading(false);
+    }
+  }
+
+  const tgStatus = status?.telegram;
+  const waStatus = status?.whatsapp;
+
   return (
     <main className="min-h-screen px-4 py-10">
       <div className="max-w-2xl mx-auto">
@@ -177,6 +251,7 @@ function CanalesContent() {
           <div style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>Cargando…</div>
         ) : (
           <div className="space-y-4">
+            {/* OAuth platforms */}
             {PLATFORMS.map((p) => {
               const st = status?.[p.id as keyof AccountsStatus];
               const isConnected = st?.connected;
@@ -294,6 +369,212 @@ function CanalesContent() {
                 </div>
               );
             })}
+
+            {/* ── Telegram ──────────────────────────────────────────── */}
+            <div style={{
+              background: "var(--surface)",
+              border: `1px solid ${tgStatus?.connected ? "var(--success)30" : "var(--border)"}`,
+              borderRadius: 16,
+              overflow: "hidden",
+            }}>
+              <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 12,
+                  background: "var(--surface2)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 22, flexShrink: 0,
+                }}>
+                  ✈️
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>Telegram</p>
+                  {tgStatus?.connected ? (
+                    <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>
+                      ✓ @{tgStatus.bot_username} → {tgStatus.chat_id}
+                    </p>
+                  ) : (
+                    <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>No conectado</p>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  {tgStatus?.connected ? (
+                    <button
+                      onClick={handleTelegramDisconnect}
+                      disabled={disconnecting === "telegram"}
+                      style={{
+                        padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                        background: "#2a0a0a", border: "1px solid var(--error)40",
+                        color: "var(--error)", cursor: "pointer",
+                        opacity: disconnecting === "telegram" ? 0.5 : 1,
+                      }}
+                    >
+                      {disconnecting === "telegram" ? "Desvinculando…" : "Desvincular"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setExpandedSetup(expandedSetup === "telegram" ? null : "telegram")}
+                      style={{
+                        padding: "6px 12px", borderRadius: 8, fontSize: 12,
+                        background: "var(--surface2)", border: "1px solid var(--border)",
+                        color: "var(--muted)", cursor: "pointer",
+                      }}
+                    >
+                      {expandedSetup === "telegram" ? "Ocultar" : "Conectar"}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {expandedSetup === "telegram" && !tgStatus?.connected && (
+                <div style={{
+                  borderTop: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                  padding: "14px 20px",
+                }}>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 10 }}>
+                    CONFIGURACIÓN TELEGRAM
+                  </p>
+                  <ol style={{ listStyle: "decimal", paddingLeft: 18, margin: "0 0 12px" }}>
+                    <li style={{ fontSize: 12, color: "var(--text)", marginBottom: 5, lineHeight: 1.5 }}>
+                      Habla con @BotFather en Telegram y crea un bot con /newbot
+                    </li>
+                    <li style={{ fontSize: 12, color: "var(--text)", marginBottom: 5, lineHeight: 1.5 }}>
+                      Copia el token que te da BotFather
+                    </li>
+                    <li style={{ fontSize: 12, color: "var(--text)", marginBottom: 5, lineHeight: 1.5 }}>
+                      Añade el bot a tu canal/grupo y obtén el Chat ID (puedes usar @userinfobot)
+                    </li>
+                  </ol>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="Bot Token (ej: 123456:ABC-DEF...)"
+                      value={tgToken}
+                      onChange={(e) => setTgToken(e.target.value)}
+                      style={{
+                        padding: "8px 12px", borderRadius: 8, fontSize: 13,
+                        background: "var(--bg)", border: "1px solid var(--border)",
+                        color: "var(--text)", outline: "none",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Chat ID o @username (ej: -100123456789)"
+                      value={tgChatId}
+                      onChange={(e) => setTgChatId(e.target.value)}
+                      style={{
+                        padding: "8px 12px", borderRadius: 8, fontSize: 13,
+                        background: "var(--bg)", border: "1px solid var(--border)",
+                        color: "var(--text)", outline: "none",
+                      }}
+                    />
+                    <button
+                      onClick={handleTelegramConnect}
+                      disabled={connecting === "telegram"}
+                      style={{
+                        padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                        background: "var(--accent)", border: "none",
+                        color: "#fff", cursor: "pointer",
+                        opacity: connecting === "telegram" ? 0.6 : 1,
+                        alignSelf: "flex-start",
+                      }}
+                    >
+                      {connecting === "telegram" ? "Conectando…" : "Conectar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── WhatsApp ──────────────────────────────────────────── */}
+            <div style={{
+              background: "var(--surface)",
+              border: `1px solid ${waStatus?.connected ? "var(--success)30" : "var(--border)"}`,
+              borderRadius: 16,
+              overflow: "hidden",
+            }}>
+              <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 12,
+                  background: "var(--surface2)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 22, flexShrink: 0,
+                }}>
+                  💬
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>WhatsApp Status</p>
+                  {waStatus?.connected && waStatus?.ready ? (
+                    <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>
+                      ✓ Conectado y listo
+                    </p>
+                  ) : waStatus?.connected ? (
+                    <p style={{ fontSize: 12, color: "#f59e0b", margin: "2px 0 0" }}>
+                      Autenticado — inicializando…
+                    </p>
+                  ) : (
+                    <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>
+                      Esperando QR / Desconectado
+                    </p>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button
+                    onClick={handleWaQr}
+                    disabled={waQrLoading}
+                    style={{
+                      padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                      background: "var(--surface2)", border: "1px solid var(--border)",
+                      color: "var(--text)", cursor: "pointer",
+                      opacity: waQrLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {waQrLoading ? "Cargando…" : "Ver QR"}
+                  </button>
+                </div>
+              </div>
+
+              {waQr && (
+                <div style={{
+                  borderTop: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                  padding: "16px 20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 10,
+                }}>
+                  <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
+                    Escanea este QR con WhatsApp (Ajustes → Dispositivos vinculados → Vincular dispositivo)
+                  </p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={waQr} alt="WhatsApp QR" style={{ width: 200, height: 200, borderRadius: 8 }} />
+                  <button
+                    onClick={() => setWaQr(null)}
+                    style={{
+                      padding: "5px 12px", borderRadius: 7, fontSize: 12,
+                      background: "transparent", border: "1px solid var(--border)",
+                      color: "var(--muted)", cursor: "pointer",
+                    }}
+                  >
+                    Ocultar QR
+                  </button>
+                </div>
+              )}
+
+              <div style={{
+                borderTop: "1px solid var(--border)",
+                background: "var(--surface2)",
+                padding: "10px 20px",
+              }}>
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0 }}>
+                  El servicio de WhatsApp debe estar corriendo:{" "}
+                  <code style={{ fontSize: 10, background: "var(--bg)", borderRadius: 4, padding: "1px 5px" }}>
+                    cd wa_service && npm start
+                  </code>
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

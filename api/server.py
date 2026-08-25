@@ -44,6 +44,7 @@ from api.accounts import router as accounts_router
 from api.publish import router as publish_router
 from api.music_clip import router as music_clip_router
 from api.article_index import router as article_index_router
+from api.storage import router as storage_router
 app.include_router(hotspots_router)
 app.include_router(library_router)
 app.include_router(templates_router)
@@ -52,6 +53,7 @@ app.include_router(accounts_router)
 app.include_router(publish_router)
 app.include_router(music_clip_router)
 app.include_router(article_index_router)
+app.include_router(storage_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -262,6 +264,14 @@ def _run_job(job_id: str, req: GenerateRequest):
                 youtube_error  = str(yt_e)
                 print(f"[YouTube] Error al subir: {yt_e}")
 
+        storage_results = []
+        if final_status == "completed" and output_files:
+            try:
+                from storage_manager import copy_to_destinations
+                storage_results = copy_to_destinations(output_files[0])
+            except Exception as st_e:
+                print(f"[Storage] Error copiando a destinos: {st_e}")
+
         with jobs_lock:
             jobs[job_id]["logs"] = log_content
             jobs[job_id]["output_files"] = [Path(p).name for p in output_files]
@@ -272,6 +282,7 @@ def _run_job(job_id: str, req: GenerateRequest):
             jobs[job_id]["youtube_url"]    = youtube_url
             jobs[job_id]["youtube_status"] = youtube_status
             jobs[job_id]["youtube_error"]  = youtube_error
+            jobs[job_id]["storage_results"] = storage_results
 
     except Exception as e:
         import traceback

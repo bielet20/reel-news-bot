@@ -26,7 +26,7 @@ class PublishRequest(BaseModel):
     filename: str
     titulo: str = ""
     descripcion: str = ""
-    platforms: list[str]          # ["youtube", "tiktok", "instagram"]
+    platforms: list[str]          # ["youtube", "tiktok", "instagram", "telegram", "whatsapp"]
     tipo_contenido: str = "noticia"  # youtube: noticia | curiosidad
     tiktok_privacy: str = "SELF_ONLY"
 
@@ -70,6 +70,10 @@ def _do_publish(job_id: str, req: PublishRequest, file_path: Path):
                 r = _upload_tiktok(req, file_path)
             elif platform == "instagram":
                 r = _upload_instagram(req, file_path)
+            elif platform == "telegram":
+                r = _upload_telegram(req, file_path)
+            elif platform == "whatsapp":
+                r = _upload_whatsapp(req, file_path)
             else:
                 r = {"status": "error", "error": "Plataforma desconocida"}
         except Exception as e:
@@ -133,6 +137,20 @@ def _upload_instagram(req: PublishRequest, file_path: Path) -> dict:
     caption = req.descripcion or req.titulo or file_path.stem
     result = subir_video(str(file_path), caption=caption)
     return {"status": "ok", "media_id": result.get("media_id")}
+
+
+def _upload_telegram(req: PublishRequest, file_path: Path) -> dict:
+    from telegram_uploader import subir_video
+    caption = req.descripcion or req.titulo or file_path.stem
+    result = subir_video(str(file_path), caption=caption)
+    return {"status": "ok", "message_id": result.get("message_id")}
+
+
+def _upload_whatsapp(req: PublishRequest, file_path: Path) -> dict:
+    from whatsapp_uploader import subir_status
+    caption = req.descripcion or req.titulo or file_path.stem
+    result = subir_status(str(file_path), caption=caption)
+    return {"status": "ok", **result}
 
 
 @router.get("/api/publish/{job_id}")

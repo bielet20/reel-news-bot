@@ -50,59 +50,51 @@ def descargar_video(url: str, carpeta_tmp: str = None,
     Descarga el video de YouTube (calidad <=1080p, mp4) a una carpeta temporal
     y devuelve la ruta local. Lanza RuntimeError si falla.
 
-    cookies_browser: nombre del navegador del que leer las cookies para
-                     autenticar la descarga (bypass de restricciones de
-                     edad/region). Valores: "chrome", "safari", "firefox",
-                     "edge", "chromium", "brave", "opera", "vivaldi".
-                     Si es None, descarga sin autenticar.
+    Usa subprocess para llamar al CLI de yt-dlp, que lee ~/.config/yt-dlp/config
+    y aplica automaticamente --js-runtimes y --remote-components configurados ahi.
     """
-    try:
-        import yt_dlp
-    except ImportError:
-        raise ImportError(
-            "Falta instalar yt-dlp:\n  pip install yt-dlp"
-        )
+    import shutil
+    import subprocess
 
+    yt_dlp_bin = shutil.which("yt-dlp") or "yt-dlp"
     carpeta_tmp = carpeta_tmp or tempfile.gettempdir()
     os.makedirs(carpeta_tmp, exist_ok=True)
-    salida = os.path.join(carpeta_tmp, f"_ytsrc_{int(time.time() * 1000)}.%(ext)s")
 
-    opciones = {
-        "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "outtmpl": salida,
-        "merge_output_format": "mp4",
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "retries": 2,
-    }
+    ts = int(time.time() * 1000)
+    salida_base = os.path.join(carpeta_tmp, f"_ytsrc_{ts}")
+    salida_tmpl = salida_base + ".%(ext)s"
+    browser = cookies_browser or "chrome"
 
-    if cookies_browser:
-        # Permite descargar videos con restriccion de edad/region usando
-        # la sesion activa del navegador del usuario.
-        opciones["cookiesfrombrowser"] = (cookies_browser,)
+    cmd = [
+        yt_dlp_bin,
+        "--format", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--merge-output-format", "mp4",
+        "--no-playlist",
+        "--retries", "2",
+        "--cookies-from-browser", browser,
+        "-o", salida_tmpl,
+        url,
+    ]
 
-    try:
-        with yt_dlp.YoutubeDL(opciones) as ydl:
-            info = ydl.extract_info(url, download=True)
-            ruta = ydl.prepare_filename(info)
-            base, _ = os.path.splitext(ruta)
-            candidato_mp4 = base + ".mp4"
-            if os.path.isfile(candidato_mp4):
-                return candidato_mp4
-            if os.path.isfile(ruta):
-                return ruta
-            raise RuntimeError("yt-dlp no genero el archivo esperado.")
-    except Exception as e:
-        sugerencia = (
-            f" Podes reintentar con --cookies-browser chrome (o safari/firefox) "
-            "para usar tu sesion del navegador."
-        ) if not cookies_browser else ""
+    resultado = subprocess.run(cmd, capture_output=True, text=True)
+    salida_mp4 = salida_base + ".mp4"
+
+    if resultado.returncode != 0 or not os.path.isfile(salida_mp4):
+        stderr = (resultado.stderr or "") + (resultado.stdout or "")
+        if "Premieres in" in stderr or "premiere" in stderr.lower():
+            raise RuntimeError(
+                "Este video es un Premiere de YouTube que todavia no se ha estrenado."
+            )
+        # Buscar cualquier extension descargada como fallback
+        for ext in (".mkv", ".webm", ".mp4"):
+            if os.path.isfile(salida_base + ext):
+                return salida_base + ext
         raise RuntimeError(
-            f"No se pudo descargar el video de YouTube ({e}). Puede estar "
-            f"restringido por edad/region, ser privado, o YouTube bloqueo la "
-            f"descarga automatica.{sugerencia}"
-        ) from e
+            f"No se pudo descargar el video de YouTube. "
+            f"Detalle: {stderr.strip()[-300:]}"
+        )
+
+    return salida_mp4
 
 
 # ---------------------------------------------------------------------------

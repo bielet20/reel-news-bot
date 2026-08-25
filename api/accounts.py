@@ -1,6 +1,6 @@
 """
 api/accounts.py
-Gestión OAuth de cuentas: YouTube, TikTok, Instagram.
+Gestión OAuth de cuentas: YouTube, TikTok, Instagram, Telegram, WhatsApp.
 """
 import os
 import sys
@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from accounts_manager import save_token, load_token, delete_token, get_account_info
@@ -50,10 +51,23 @@ def accounts_status():
         else:
             youtube = {"connected": False}
 
+    # WhatsApp: consulta el sidecar Node.js
+    try:
+        from whatsapp_uploader import get_status as wa_get_status
+        wa_status = wa_get_status()
+        whatsapp = {
+            "connected": wa_status.get("connected", False),
+            "ready": wa_status.get("ready", False),
+        }
+    except Exception:
+        whatsapp = {"connected": False, "ready": False}
+
     return {
         "youtube":   youtube,
         "tiktok":    get_account_info("tiktok"),
         "instagram": get_account_info("instagram"),
+        "telegram":  get_account_info("telegram"),
+        "whatsapp":  whatsapp,
     }
 
 
@@ -355,11 +369,85 @@ def instagram_callback(code: str = None, state: str = None, error: str = None):
     return RedirectResponse(f"{FRONTEND}/canales?instagram=ok")
 
 
+# ── Telegram ─────────────────────────────────────────────────────────────────
+
+class TelegramConnectRequest(BaseModel):
+    bot_token: str
+    chat_id: str
+
+
+@router.post("/api/accounts/telegram/connect")
+def telegram_connect(req: TelegramConnectRequest):
+    """Guarda el bot token y chat_id de Telegram."""
+    if not req.bot_token or not req.chat_id:
+        raise HTTPException(status_code=400, detail={
+            "error": "missing_credentials",
+            "message": "bot_token y chat_id son requeridos",
+        })
+
+    # Verificar que el token es válido consultando getMe
+    try:
+        test = http.get(
+            f"https://api.telegram.org/bot{req.bot_token}/getMe",
+            timeout=10,
+        )
+        data = test.json()
+        if not data.get("ok"):
+            raise HTTPException(status_code=400, detail={
+                "error": "invalid_token",
+                "message": f"Token inválido: {data.get('description', 'error desconocido')}",
+            })
+        bot_username = data["result"].get("username", "bot")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail={
+            "error": "connection_error",
+            "message": f"No se pudo verificar el token: {e}",
+        })
+
+    save_token("telegram", {
+        "bot_token": req.bot_token,
+        "chat_id": req.chat_id,
+        "bot_username": bot_username,
+    })
+    return {"ok": True, "bot_username": bot_username}
+
+
+@router.delete("/api/accounts/telegram/disconnect")
+def telegram_disconnect():
+    delete_token("telegram")
+    return {"ok": True}
+
+
+# ── WhatsApp ──────────────────────────────────────────────────────────────────
+
+@router.get("/api/accounts/whatsapp/status")
+def whatsapp_status():
+    """Estado de conexión del sidecar WhatsApp."""
+    try:
+        from whatsapp_uploader import get_status as wa_get_status
+        return wa_get_status()
+    except Exception as e:
+        return {"connected": False, "ready": False, "error": str(e)}
+
+
+@router.get("/api/accounts/whatsapp/qr")
+def whatsapp_qr():
+    """Devuelve el QR de vinculación como base64."""
+    try:
+        from whatsapp_uploader import get_qr
+        qr = get_qr()
+        return {"qr": qr}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 # ── Disconnect ────────────────────────────────────────────────────────────────
 
 @router.delete("/api/accounts/{platform}")
 def disconnect(platform: str):
-    if platform not in ("youtube", "tiktok", "instagram"):
+    if platform not in ("youtube", "tiktok", "instagram", "telegram"):
         raise HTTPException(status_code=400, detail="Plataforma desconocida")
     delete_token(platform)
     return {"ok": True}

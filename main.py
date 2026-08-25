@@ -60,6 +60,7 @@ from video_extractor import transcribir_video_local
 from music_analyzer import EXTS_VIDEO as _EXTS_VIDEO, EXTS_AUDIO as _EXTS_AUDIO
 from image_pipeline import preparar_imagenes
 from avatar_generator import generar_avatar, estado as avatar_estado
+from local_reel_builder import construir_reel_video_local
 
 CARPETA_SALIDA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
@@ -231,6 +232,7 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
         n_ai=3,
         servicio_ai=servicio_ai,
         carpeta_tmp=carpeta_imgs,
+        texto_guion=guion.get("guion", ""),
     )
 
     # Avatar hablando (lip sync)
@@ -370,18 +372,43 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
     Devuelve lista de rutas de videos generados.
     """
     print(f"\n=== Procesando video de YouTube: {url} ===")
+    datos = None
+    _error_transcripcion = None
     try:
         datos = extraer_youtube(url)
+        if len(datos["texto"].split()) < 30:
+            print("   -> Transcripcion muy corta (posible videoclip). Intentando como musical...")
+            datos = None
     except Exception as e:
-        raise RuntimeError(
-            f"No se pudo procesar el video de YouTube: {e}"
-        ) from e
+        _error_transcripcion = str(e)
+        # Si el video es un Premiere aun no estrenado, no tiene sentido intentar nada mas
+        if "Premieres in" in _error_transcripcion or "premiere" in _error_transcripcion.lower():
+            raise RuntimeError(
+                "Este video es un Premiere de YouTube que todavia no se ha estrenado. "
+                "Espera a que se publique y vuelve a intentarlo."
+            ) from e
+        print(f"   -> No hay transcripcion disponible. Intentando como videoclip musical...")
 
-    if len(datos["texto"].split()) < 30:
-        raise ValueError(
-            "La transcripcion del video es demasiado corta para generar un reel. "
-            "Asegurate de que el video tenga subtitulos habilitados."
-        )
+    if datos is None:
+        try:
+            ruta = procesar_musica(
+                url,
+                carpeta_salida=carpeta_salida,
+                duracion_maxima=duracion_maxima,
+                cookies_browser=cookies_browser,
+            )
+            return [ruta]
+        except Exception as e:
+            err = str(e)
+            if "Premieres in" in err or "premiere" in err.lower():
+                raise RuntimeError(
+                    "Este video es un Premiere de YouTube que todavia no se ha estrenado. "
+                    "Espera a que se publique y vuelve a intentarlo."
+                ) from e
+            raise RuntimeError(
+                f"No se pudo procesar el video de YouTube: sin transcripcion y el modo "
+                f"musical tambien fallo ({e})"
+            ) from e
 
     fuente = datos["canal"] or "YouTube"
     print(f"   Titulo: {datos['titulo']}  (canal: {fuente})")
@@ -499,6 +526,66 @@ def procesar_video_local(ruta: str, carpeta_salida: str = CARPETA_SALIDA,
         print(f"   Video generado: {resultado['ruta_video']}")
         rutas.append(resultado["ruta_video"])
     return rutas
+
+
+def procesar_reel_video_local(
+    ruta_audio: str,
+    rutas_clips: list,
+    carpeta_salida: str = CARPETA_SALIDA,
+    duracion_maxima: int = 60,
+    artista: str = None,
+    mostrar_nombre: bool = False,
+) -> str:
+    """
+    Genera un reel vertical (1080×1920) a partir de:
+      - ruta_audio: audio local (.mp3, .wav, .flac, ...)
+      - rutas_clips: lista de imágenes (.jpg, .png) y/o videos (.mp4, .mov, ...)
+                     que se usan como fondo visual en slideshow.
+
+    Detecta el coro/hook automáticamente con librosa y genera un reel de
+    máximo duracion_maxima segundos (por defecto 60).
+    """
+    from music_analyzer import detectar_coro
+
+    if not os.path.isfile(ruta_audio):
+        raise FileNotFoundError(f"Audio no encontrado: {ruta_audio}")
+    if not rutas_clips:
+        raise ValueError("Debes pasar al menos un clip visual con --clips.")
+
+    print(f"\n=== Procesando reel de video local ===")
+    print(f"   Audio: {ruta_audio}")
+    print(f"   Clips visuales ({len(rutas_clips)}): {[os.path.basename(r) for r in rutas_clips]}")
+
+    highlight = detectar_coro(
+        ruta_audio,
+        duracion_objetivo=min(45, duracion_maxima),
+        duracion_min=min(20, duracion_maxima),
+        duracion_max=duracion_maxima,
+    )
+    print(f"   -> Coro detectado: {highlight['inicio']:.1f}s - "
+          f"{highlight['fin']:.1f}s ({highlight['duracion']:.1f}s)")
+
+    os.makedirs(carpeta_salida, exist_ok=True)
+    titulo = os.path.splitext(os.path.basename(ruta_audio))[0]
+    slug = _slug(titulo)
+    ruta_salida = os.path.join(carpeta_salida, f"{slug}_reel.mp4")
+
+    titulo_mostrar = titulo if mostrar_nombre else ""
+    artista_mostrar = artista or ""
+
+    construir_reel_video_local(
+        ruta_audio=ruta_audio,
+        rutas_clips=rutas_clips,
+        inicio=highlight["inicio"],
+        fin=highlight["fin"],
+        titulo=titulo_mostrar,
+        artista=artista_mostrar if mostrar_nombre else "",
+        ruta_salida=ruta_salida,
+        mostrar_cabecera=mostrar_nombre,
+    )
+
+    print(f"   Video generado: {ruta_salida}")
+    return ruta_salida
 
 
 def procesar_musica(fuente: str, carpeta_salida: str = CARPETA_SALIDA,
@@ -721,6 +808,14 @@ def main():
                         help="Link a un articulo especifico. Se puede repetir.")
     parser.add_argument("--archivo", action="append", default=None,
                         help="Ruta a un .txt con un articulo pegado a mano (ver README).")
+    # --- Modo reel de video local (audio + clips visuales propios) ---
+    parser.add_argument("--reel-local", default=None, metavar="RUTA_AUDIO",
+                        help="Ruta a un audio local (.mp3, .wav, .flac, ...) para generar "
+                             "un reel usando tus propios clips visuales (--clips). "
+                             "Detecta el coro/hook automaticamente. Max 60s.")
+    parser.add_argument("--clips", nargs="+", default=None, metavar="RUTA",
+                        help="Lista de imágenes (.jpg, .png) y/o videos (.mp4, .mov) "
+                             "a usar como fondo visual del reel. Se usan con --reel-local.")
     # --- Modo musica ---
     parser.add_argument("--musica", action="append", default=None, metavar="URL_O_RUTA",
                         help="URL de YouTube o ruta local (video .mp4 o audio .mp3/.wav/...) "
@@ -832,6 +927,26 @@ def main():
     args = parser.parse_args()
 
     generados = []
+
+    # ---- Modo: Reel de video local ----
+    if args.reel_local:
+        try:
+            ruta = procesar_reel_video_local(
+                ruta_audio=args.reel_local,
+                rutas_clips=args.clips or [],
+                duracion_maxima=args.duracion_maxima,
+                artista=args.artista,
+                mostrar_nombre=args.mostrar_nombre_musica,
+            )
+            generados.append(ruta)
+        except Exception:
+            print("[ERROR] Fallo al generar el reel de video local:")
+            traceback.print_exc()
+
+        print("\n=== Listo ===")
+        for r in generados:
+            print(" -", r)
+        return
 
     # ---- Modo: Musica ----
     if args.musica:

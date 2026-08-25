@@ -75,4 +75,10 @@ def get_account_info(platform: str) -> dict:
             "connected": connected,
             "username": token.get("username", "usuario"),
         }
+    elif platform == "telegram":
+        return {
+            "connected": connected,
+            "bot_username": token.get("bot_username", "bot"),
+            "chat_id": token.get("chat_id", ""),
+        }
     return {"connected": False}
