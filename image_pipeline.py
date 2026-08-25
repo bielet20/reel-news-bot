@@ -62,15 +62,20 @@ def _redimensionar_para_video(ruta: str) -> str:
     return ruta
 
 
-def extraer_queries_articulo(titulo: str, texto: str = "") -> list:
+def extraer_queries_articulo(titulo: str, texto: str = "",
+                              texto_guion: str = "") -> list:
     """
-    Genera 3 queries de búsqueda relacionadas con el artículo.
-    La primera usa el título completo; las otras usan palabras clave
-    extraídas del texto para dar variedad visual al slideshow.
+    Genera 3 queries de búsqueda relacionadas con el reel.
+    Usa el guion generado como fuente primaria (es el texto exacto del reel),
+    y el artículo como complemento para variedad visual.
     """
+    # El guion tiene más peso: es lo que realmente sale en el reel
+    fuente_primaria = (texto_guion + " ") * 4 if texto_guion else (titulo + " ") * 3
+    fuente_secundaria = texto[:400] if texto else ""
+
     palabras = re.findall(
         r'\b[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{4,}\b',
-        (titulo + " ") * 3 + texto[:600],
+        fuente_primaria + fuente_secundaria,
     )
     freq: dict = {}
     for p in palabras:
@@ -81,8 +86,8 @@ def extraer_queries_articulo(titulo: str, texto: str = "") -> list:
     top = [w for w, _ in sorted(freq.items(), key=lambda x: -x[1])[:10]]
 
     q1 = titulo[:80]
-    q2 = " ".join(top[:3]) if top else titulo[:50]
-    q3 = " ".join(top[3:6]) if len(top) > 3 else q2
+    q2 = " ".join(top[:4]) if top else titulo[:60]
+    q3 = " ".join(top[4:8]) if len(top) > 4 else " ".join(top[:4])
 
     return [q1, q2, q3]
 
@@ -354,16 +359,17 @@ def preparar_imagenes(
     n_ai: int = 3,
     servicio_ai: str = "pollinations",
     carpeta_tmp: str = None,
+    texto_guion: str = "",
 ) -> list:
     """
     Pipeline completo de imágenes. Prioridad:
     1. Imágenes subidas por el usuario
     2. Imágenes del artículo (scraping)
-    3. Fotos de repositorios (Pexels/Unsplash/Pixabay) usando keywords del artículo
-    4. Imágenes generadas con IA (Pollinations.ai) usando keywords del artículo
+    3. Fotos de repositorios (Pexels/Unsplash/Pixabay) con queries del guion
+    4. Imágenes generadas con IA (Pollinations.ai) con queries del guion
 
-    Los pasos 3 y 4 se ejecutan siempre automáticamente cuando faltan imágenes,
-    usando queries extraídas del contenido del artículo para máxima relevancia.
+    Los pasos 3 y 4 usan el texto_guion (script generado) como fuente primaria
+    para las queries, garantizando relevancia con lo que sale en el reel.
 
     Devuelve lista de rutas locales listas para usar como fondo del video.
     """
@@ -398,28 +404,30 @@ def preparar_imagenes(
         if imgs_art:
             print(f"   -> {len(imgs_art)} imagen(es) extraída(s) del artículo")
 
-    # 3 + 4. Buscar en repositorios y/o generar con IA (siempre automático)
+    # 3 + 4. Buscar/generar imágenes relacionadas con el contenido del reel
     if len(imagenes) < n_ai:
-        queries = extraer_queries_articulo(titulo, texto_articulo)
+        # Queries derivadas del guion generado (fuente más relevante)
+        queries = extraer_queries_articulo(titulo, texto_articulo,
+                                           texto_guion=texto_guion)
         faltantes = n_ai - len(imagenes)
-        print(f"   -> Buscando {faltantes} imagen(es) relacionadas con el artículo...")
+        fuente_desc = "el guion del reel" if texto_guion else "el artículo"
+        print(f"   -> Buscando {faltantes} imagen(es) relacionadas con {fuente_desc}...")
+        print(f"      Queries: {queries[:faltantes]}")
 
         for i, query in enumerate(queries[:faltantes]):
             ruta_foto = str(carpeta / f"repo_{i}.jpg")
             ruta_ai = str(carpeta / f"ai_{i}.jpg")
 
-            # Intentar repositorios de fotos reales primero
+            # Fotos reales de repositorios (si hay API key)
             r = _buscar_foto_repositorios(query, ruta_foto)
             if r:
                 imagenes.append(r)
                 continue
 
-            # Fallback: generar con IA si el usuario lo activó explícitamente
-            # O siempre con Pollinations (gratis) para garantizar imágenes relevantes
-            if generar_ai or servicio_ai == "pollinations" or not os.path.exists(ruta_foto):
-                r = _generar_pollinations(query, ruta_ai, seed=abs(hash(query + str(i))) % 99999)
-                if r:
-                    imagenes.append(r)
+            # Siempre generar con Pollinations como fallback garantizado
+            r = _generar_pollinations(query, ruta_ai, seed=abs(hash(query + str(i))) % 99999)
+            if r:
+                imagenes.append(r)
 
             if len(imagenes) >= n_ai:
                 break

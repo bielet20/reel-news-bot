@@ -84,6 +84,7 @@ export default function Home() {
   const [artista, setArtista] = useState("");
   const [modoYt, setModoYt] = useState("clip");
   const [ytAutoSegmento, setYtAutoSegmento] = useState(true);
+  const [cookiesBrowser, setCookiesBrowser] = useState("chrome");
   const [musicaMostrarNombre, setMusicaMostrarNombre] = useState(false);
   const [tipoContenido, setTipoContenido] = useState<"noticia" | "curiosidad">("noticia");
   const [subirYoutube, setSubirYoutube] = useState(false);
@@ -276,8 +277,8 @@ export default function Home() {
 
     if (mode === "url") body.url = url;
     else if (mode === "texto") { body.titulo = titulo; body.fuente = fuente; body.texto = texto; if (urlFuente) body.url_fuente = urlFuente; }
-    else if (mode === "youtube") { body.url = url; body.modo_youtube = modoYt; body.cantidad_shorts = cantidad; body.youtube_auto_segmento = ytAutoSegmento; }
-    else if (mode === "musica") { body.url = url; body.artista = artista; body.musica_mostrar_nombre = musicaMostrarNombre; }
+    else if (mode === "youtube") { body.url = url; body.modo_youtube = modoYt; body.cantidad_shorts = cantidad; body.youtube_auto_segmento = ytAutoSegmento; body.cookies_browser = cookiesBrowser; }
+    else if (mode === "musica") { body.url = url; body.artista = artista; body.musica_mostrar_nombre = musicaMostrarNombre; body.cookies_browser = cookiesBrowser; }
     else if (mode === "tema") body.tema = tema;
 
     if (imgConfig.mode === "upload") body.imagenes_subidas = imgConfig.uploadedPaths;
@@ -514,6 +515,17 @@ export default function Home() {
                     ]} />
                   </Field>
                 </div>
+                {modoYt === "clip" && (
+                  <Field label="Navegador (cookies para descarga)">
+                    <SelectInput value={cookiesBrowser} onChange={setCookiesBrowser} options={[
+                      { value: "chrome",  label: "Chrome" },
+                      { value: "safari",  label: "Safari" },
+                      { value: "firefox", label: "Firefox" },
+                      { value: "edge",    label: "Edge" },
+                      { value: "brave",   label: "Brave" },
+                    ]} />
+                  </Field>
+                )}
                 <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                   <Toggle value={ytAutoSegmento} onChange={setYtAutoSegmento} />
                   <span style={{ fontSize: 13, color: ytAutoSegmento ? "var(--text)" : "var(--muted)" }}>
@@ -527,6 +539,15 @@ export default function Home() {
               <>
                 <Field label="Artista (opcional)">
                   <TextInput value={artista} onChange={setArtista} placeholder="Nombre del artista" />
+                </Field>
+                <Field label="Navegador (cookies para descarga)">
+                  <SelectInput value={cookiesBrowser} onChange={setCookiesBrowser} options={[
+                    { value: "chrome",  label: "Chrome" },
+                    { value: "safari",  label: "Safari" },
+                    { value: "firefox", label: "Firefox" },
+                    { value: "edge",    label: "Edge" },
+                    { value: "brave",   label: "Brave" },
+                  ]} />
                 </Field>
                 <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                   <Toggle value={musicaMostrarNombre} onChange={setMusicaMostrarNombre} />
