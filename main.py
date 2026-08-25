@@ -42,6 +42,21 @@ import re
 import sys
 import traceback
 
+# En Windows, si stdout/stderr no estan atados a una consola real (p.ej.
+# redirigidos a un archivo por el backend, o por algun otro lanzador), Python
+# usa por defecto la codificacion del sistema (cp1252 en Windows en espanol)
+# en vez de UTF-8. Un print() con emojis, flechas u otros caracteres fuera de
+# ese rango revienta con UnicodeEncodeError. api/server.py ya fija
+# PYTHONIOENCODING=utf-8 al lanzar este script como subproceso, pero esto lo
+# deja tambien a prueba de fallos si se ejecuta directo (p.ej. `python
+# main.py --tema x` en una terminal de Windows sin esa variable).
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 try:
     from dotenv import load_dotenv
     load_dotenv()

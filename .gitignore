@@ -22,6 +22,10 @@ _templates/
 # Tokens OAuth de redes sociales (no subir a GitHub)
 _tokens/
 
+# Destinos de almacenamiento configurados en /settings: rutas locales y
+# enlaces de Drive/NAS especificos de cada equipo, no se sube al repo.
+_config/
+
 # Python
 __pycache__/
 *.py[cod]

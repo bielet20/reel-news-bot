@@ -14,6 +14,7 @@ Pipeline por sección:
 import hashlib
 import os
 import re
+import tempfile
 import urllib.parse
 from pathlib import Path
 
@@ -302,7 +303,7 @@ def generar_clips(
 
         slug = re.sub(r"[^\w]", "_", sec["label"].lower())[:18]
         ruta_out = f"{ruta_salida_base}_{i + 1:02d}_{slug}_reel.mp4"
-        tmp_audio = f"/tmp/_lyric_{os.getpid()}_{i}.m4a"
+        tmp_audio = os.path.join(tempfile.gettempdir(), f"_lyric_{os.getpid()}_{i}.m4a")
 
         video.write_videofile(
             ruta_out, fps=30, codec="libx264", audio_codec="aac",

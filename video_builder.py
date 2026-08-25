@@ -631,6 +631,7 @@ if __name__ == "__main__":
         "electrica de varios paises podria verse afectada."
     )
     guion = generar_guion_reel("El costo energetico de la IA se dispara", texto_prueba, "Reuters")
-    audio_path = generar_audio(guion["guion"], "/tmp/audio_prueba.mp3")
-    construir_video(guion, audio_path, "/tmp/reel_prueba.mp4", tema="tecnologia")
-    print("Video generado en /tmp/reel_prueba.mp4")
+    audio_path = generar_audio(guion["guion"], os.path.join(tempfile.gettempdir(), "audio_prueba.mp3"))
+    salida = os.path.join(tempfile.gettempdir(), "reel_prueba.mp4")
+    construir_video(guion, audio_path, salida, tema="tecnologia")
+    print(f"Video generado en {salida}")

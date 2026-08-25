@@ -14,6 +14,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# En Windows, cuando este proceso no está atado a una consola real (p.ej.
+# lanzado con nohup/redirigido a un log, o como servicio), Python usa por
+# defecto la codificación del sistema (cp1252 en Windows en español) para
+# stdout/stderr en vez de UTF-8. Cualquier print() con emojis, flechas (→)
+# u otros caracteres fuera de ese rango revienta con UnicodeEncodeError y
+# mata el hilo/job que lo imprime, aunque el resto del trabajo ya esté
+# hecho. Forzamos UTF-8 aquí para todo el proceso (incluye los hilos de
+# api/music_clip.py, que corren dentro de este mismo proceso).
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent.parent / ".env")
