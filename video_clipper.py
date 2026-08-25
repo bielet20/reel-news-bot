@@ -65,36 +65,52 @@ def descargar_video(url: str, carpeta_tmp: str = None,
     salida_tmpl = salida_base + ".%(ext)s"
     browser = cookies_browser or "chrome"
 
-    cmd = [
+    base_cmd = [
         yt_dlp_bin,
         "--format", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "--merge-output-format", "mp4",
         "--no-playlist",
         "--retries", "2",
-        "--cookies-from-browser", browser,
-        "-o", salida_tmpl,
-        url,
     ]
 
-    resultado = subprocess.run(cmd, capture_output=True, text=True)
-    salida_mp4 = salida_base + ".mp4"
-
-    if resultado.returncode != 0 or not os.path.isfile(salida_mp4):
-        stderr = (resultado.stderr or "") + (resultado.stdout or "")
-        if "Premieres in" in stderr or "premiere" in stderr.lower():
-            raise RuntimeError(
-                "Este video es un Premiere de YouTube que todavia no se ha estrenado."
-            )
-        # Buscar cualquier extension descargada como fallback
+    def _intentar(cmd: list):
+        resultado = subprocess.run(cmd, capture_output=True, text=True)
+        salida_mp4 = salida_base + ".mp4"
+        if resultado.returncode == 0 and os.path.isfile(salida_mp4):
+            return salida_mp4
         for ext in (".mkv", ".webm", ".mp4"):
             if os.path.isfile(salida_base + ext):
                 return salida_base + ext
-        raise RuntimeError(
-            f"No se pudo descargar el video de YouTube. "
-            f"Detalle: {stderr.strip()[-300:]}"
-        )
+        return None
 
-    return salida_mp4
+    ruta = _intentar(base_cmd + ["--cookies-from-browser", browser, "-o", salida_tmpl, url])
+    if ruta:
+        return ruta
+
+    # Si el fallo es al extraer las cookies del navegador (perfil bloqueado,
+    # base de datos cifrada de forma distinta en este equipo, etc.) la
+    # mayoria de videos publicos igual se pueden descargar sin cookies -
+    # reintenta antes de rendirse. Las cookies solo son necesarias para
+    # contenido con restriccion de edad o privado.
+    resultado_sin_cookies = subprocess.run(
+        base_cmd + ["-o", salida_tmpl, url], capture_output=True, text=True
+    )
+    salida_mp4 = salida_base + ".mp4"
+    if resultado_sin_cookies.returncode == 0 and os.path.isfile(salida_mp4):
+        return salida_mp4
+    stderr = (resultado_sin_cookies.stderr or "") + (resultado_sin_cookies.stdout or "")
+
+    if "Premieres in" in stderr or "premiere" in stderr.lower():
+        raise RuntimeError(
+            "Este video es un Premiere de YouTube que todavia no se ha estrenado."
+        )
+    for ext in (".mkv", ".webm", ".mp4"):
+        if os.path.isfile(salida_base + ext):
+            return salida_base + ext
+    raise RuntimeError(
+        f"No se pudo descargar el video de YouTube. "
+        f"Detalle: {stderr.strip()[-300:]}"
+    )
 
 
 # ---------------------------------------------------------------------------
