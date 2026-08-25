@@ -1,0 +1,11 @@
+# dependencies
+/node_modules
+
+# Sesion de WhatsApp Web (whatsapp-web.js/LocalAuth): credenciales del
+# navegador autenticado. Nunca se sube al repo (equivalente a _tokens/ en
+# la raiz del proyecto).
+/.wwebjs_auth
+
+# misc
+.DS_Store
+npm-debug.log*

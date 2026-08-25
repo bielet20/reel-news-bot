@@ -196,9 +196,20 @@ def _run_job(job_id: str, req: GenerateRequest):
             jobs[job_id]["log_file"] = str(log_path)
             jobs[job_id]["started_at"] = datetime.now().isoformat()
 
+        # Fuerza UTF-8 en el subproceso: en Windows, cuando stdout se
+        # redirige a un archivo (no a una consola), Python usa por defecto
+        # la codificación del sistema (p.ej. cp1252 en Windows en español),
+        # que no soporta emojis ni ciertos caracteres que puede generar la
+        # IA en el guion. Sin esto, un print() con esos caracteres revienta
+        # con UnicodeEncodeError y el job falla aunque todo lo demás vaya bien.
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
         with open(log_path, "w", encoding="utf-8") as lf:
             proc = subprocess.Popen(
-                cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=str(CORE_DIR)
+                cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=str(CORE_DIR),
+                env=env,
             )
 
         returncode = proc.wait()
