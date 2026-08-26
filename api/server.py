@@ -403,12 +403,66 @@ def list_output():
     return files
 
 
+@app.get("/api/output/stats")
+def output_stats():
+    """Espacio total ocupado por output/ (video + todos sus sidecars)."""
+    archivos = [f for f in OUTPUT_DIR.iterdir() if f.is_file()]
+    return {
+        "count": sum(1 for f in archivos if f.name.endswith("_reel.mp4")),
+        "total_bytes": sum(f.stat().st_size for f in archivos),
+    }
+
+
+# Sidecars que puede generar un reel, segun el pipeline que lo creo
+# (narrado: audio/caption/fuente/guion — clip/musica: info). Todos comparten
+# el mismo slug base que el .mp4 (ver main.py: _guardar_atribucion, _info.txt).
+_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt")
+_VIDEO_NAME_RE = re.compile(r"^(.+?)(_short\d+)?_(?:music_)?reel\.mp4$")
+
+
+def _reel_base_y_sufijo(filename: str):
+    """De 'foo_short2_reel.mp4' -> ('foo', '_short2'); de 'foo_reel.mp4' -> ('foo', '')."""
+    m = _VIDEO_NAME_RE.match(filename)
+    if not m:
+        return None
+    return m.group(1), (m.group(2) or "")
+
+
 @app.get("/api/videos/{filename}")
 def get_video(filename: str):
     file_path = OUTPUT_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
     return FileResponse(str(file_path), media_type="video/mp4")
+
+
+@app.delete("/api/output/{filename}")
+def delete_output(filename: str):
+    """Borra un reel generado y sus archivos asociados (guion, audio,
+    caption, fuente, info) que compartan el mismo slug — no toca los de
+    otros videos ni otros shorts del mismo video."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nombre de archivo invalido")
+
+    file_path = OUTPUT_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    base_info = _reel_base_y_sufijo(filename)
+    borrados = []
+    if base_info:
+        base, sufijo = base_info
+        candidatos = [filename] + [f"{base}{sufijo}{suf}" for suf in _SIDECAR_SUFFIXES]
+    else:
+        candidatos = [filename]
+
+    for nombre in candidatos:
+        ruta = OUTPUT_DIR / nombre
+        if ruta.exists() and ruta.is_file():
+            ruta.unlink()
+            borrados.append(nombre)
+
+    return {"ok": True, "borrados": borrados}
 
 
 @app.post("/api/upload")
