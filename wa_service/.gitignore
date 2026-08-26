@@ -5,6 +5,7 @@
 # navegador autenticado. Nunca se sube al repo (equivalente a _tokens/ en
 # la raiz del proyecto).
 /.wwebjs_auth
+/.wwebjs_cache
 
 # misc
 .DS_Store
