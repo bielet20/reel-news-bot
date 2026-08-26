@@ -44,14 +44,42 @@ ANCHO_V, ALTO_V = ANCHO, ALTO  # 1080x1920
 # 1. Descarga del video original (yt-dlp, sin API key)
 # ---------------------------------------------------------------------------
 
+def _extraer_error_relevante(salida: str, max_chars: int = 500) -> str:
+    """
+    yt-dlp imprime el progreso de descarga como muchas lineas
+    "[download]  NN.N% of ...". Si el proceso falla o se corta, esas lineas
+    de progreso son lo ultimo que hay en el buffer y tapan el error real.
+    Filtra esas lineas de ruido y devuelve las lineas de error/aviso.
+    """
+    lineas = [l for l in salida.splitlines() if l.strip()]
+    relevantes = [l for l in lineas if not re.match(r"^\[download\]\s+[\d.]+%", l.strip())]
+    texto = "\n".join(relevantes) if relevantes else "\n".join(lineas)
+    return texto.strip()[-max_chars:]
+
+
+# Errores permanentes: reintentar no va a arreglarlos, mejor fallar rapido.
+_ERRORES_PERMANENTES = (
+    "Private video", "This video is unavailable", "age-restricted",
+    "Sign in to confirm", "has been removed", "copyright",
+)
+
+
 def descargar_video(url: str, carpeta_tmp: str = None,
-                     cookies_browser: str = None) -> str:
+                     cookies_browser: str = None,
+                     intentos: int = 2) -> str:
     """
     Descarga el video de YouTube (calidad <=1080p, mp4) a una carpeta temporal
     y devuelve la ruta local. Lanza RuntimeError si falla.
 
     Usa subprocess para llamar al CLI de yt-dlp, que lee ~/.config/yt-dlp/config
     y aplica automaticamente --js-runtimes y --remote-components configurados ahi.
+
+    Por cada intento prueba primero con cookies del navegador y, si falla,
+    sin cookies (las cookies solo hacen falta para contenido con restriccion
+    de edad o privado). Si ambas variantes fallan y el error no pinta a
+    permanente (privado, retirado, etc.) se repite el ciclo completo hasta
+    `intentos` veces con una pequena espera entre medias, para absorber
+    cortes de red puntuales durante la descarga.
     """
     import shutil
     import subprocess
@@ -60,9 +88,6 @@ def descargar_video(url: str, carpeta_tmp: str = None,
     carpeta_tmp = carpeta_tmp or tempfile.gettempdir()
     os.makedirs(carpeta_tmp, exist_ok=True)
 
-    ts = int(time.time() * 1000)
-    salida_base = os.path.join(carpeta_tmp, f"_ytsrc_{ts}")
-    salida_tmpl = salida_base + ".%(ext)s"
     browser = cookies_browser or "chrome"
 
     base_cmd = [
@@ -71,45 +96,58 @@ def descargar_video(url: str, carpeta_tmp: str = None,
         "--merge-output-format", "mp4",
         "--no-playlist",
         "--retries", "2",
+        # El cliente "android_vr" (que yt-dlp mete por defecto en la rotacion
+        # de clientes) esta devolviendo 403 Forbidden en YouTube desde hace
+        # dias mientras el resto (visionos, web, ios...) funcionan bien.
+        # Se excluye explicitamente para no depender de la suerte del sorteo.
+        "--extractor-args", "youtube:player_client=default,-android_vr",
     ]
 
-    def _intentar(cmd: list):
+    def _intentar(cmd: list, salida_base: str):
         resultado = subprocess.run(cmd, capture_output=True, text=True)
         salida_mp4 = salida_base + ".mp4"
         if resultado.returncode == 0 and os.path.isfile(salida_mp4):
-            return salida_mp4
+            return salida_mp4, None
         for ext in (".mkv", ".webm", ".mp4"):
             if os.path.isfile(salida_base + ext):
-                return salida_base + ext
-        return None
+                return salida_base + ext, None
+        stderr = (resultado.stderr or "") + (resultado.stdout or "")
+        return None, stderr
 
-    ruta = _intentar(base_cmd + ["--cookies-from-browser", browser, "-o", salida_tmpl, url])
-    if ruta:
-        return ruta
+    ultimo_error = ""
+    for intento in range(1, intentos + 1):
+        ts = int(time.time() * 1000)
+        salida_base = os.path.join(carpeta_tmp, f"_ytsrc_{ts}")
+        salida_tmpl = salida_base + ".%(ext)s"
 
-    # Si el fallo es al extraer las cookies del navegador (perfil bloqueado,
-    # base de datos cifrada de forma distinta en este equipo, etc.) la
-    # mayoria de videos publicos igual se pueden descargar sin cookies -
-    # reintenta antes de rendirse. Las cookies solo son necesarias para
-    # contenido con restriccion de edad o privado.
-    resultado_sin_cookies = subprocess.run(
-        base_cmd + ["-o", salida_tmpl, url], capture_output=True, text=True
-    )
-    salida_mp4 = salida_base + ".mp4"
-    if resultado_sin_cookies.returncode == 0 and os.path.isfile(salida_mp4):
-        return salida_mp4
-    stderr = (resultado_sin_cookies.stderr or "") + (resultado_sin_cookies.stdout or "")
+        ruta, _ = _intentar(base_cmd + ["--cookies-from-browser", browser, "-o", salida_tmpl, url], salida_base)
+        if ruta:
+            return ruta
 
-    if "Premieres in" in stderr or "premiere" in stderr.lower():
-        raise RuntimeError(
-            "Este video es un Premiere de YouTube que todavia no se ha estrenado."
-        )
-    for ext in (".mkv", ".webm", ".mp4"):
-        if os.path.isfile(salida_base + ext):
-            return salida_base + ext
+        # Si el fallo es al extraer las cookies del navegador (perfil bloqueado,
+        # base de datos cifrada de forma distinta en este equipo, etc.) la
+        # mayoria de videos publicos igual se pueden descargar sin cookies.
+        ruta, stderr = _intentar(base_cmd + ["-o", salida_tmpl, url], salida_base)
+        if ruta:
+            return ruta
+
+        ultimo_error = stderr or ""
+
+        if "Premieres in" in ultimo_error or "premiere" in ultimo_error.lower():
+            raise RuntimeError(
+                "Este video es un Premiere de YouTube que todavia no se ha estrenado."
+            )
+        if any(marca in ultimo_error for marca in _ERRORES_PERMANENTES):
+            break
+
+        if intento < intentos:
+            print(f"   [WARN] Descarga incompleta (intento {intento}/{intentos}), "
+                  f"puede ser un corte de red puntual. Reintentando en 3s...")
+            time.sleep(3)
+
     raise RuntimeError(
-        f"No se pudo descargar el video de YouTube. "
-        f"Detalle: {stderr.strip()[-300:]}"
+        f"No se pudo descargar el video de YouTube tras {intentos} intento(s). "
+        f"Detalle: {_extraer_error_relevante(ultimo_error)}"
     )
 
 

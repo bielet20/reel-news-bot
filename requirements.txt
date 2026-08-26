@@ -12,7 +12,7 @@ pillow
 numpy
 opencv-python
 youtube-transcript-api
-yt-dlp
+yt-dlp>=2026.08.19  # YouTube rompe compatibilidad a menudo; mantener actualizado (pip install --upgrade yt-dlp)
 # API server
 fastapi
 uvicorn[standard]
