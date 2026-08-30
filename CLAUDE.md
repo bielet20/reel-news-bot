@@ -1,65 +1,127 @@
-# Reel News Bot — Generador de Shorts Automáticos
+# Reel News Bot — generador de reels/shorts
 
-Bot Python que genera YouTube Shorts/Reels automáticamente desde noticias, URLs, videos de YouTube o tendencias. Descarga, genera audio con gTTS, monta el vídeo vertical con MoviePy y lo sube a Instagram/YouTube.
+Dos productos en el mismo repo:
 
-## Stack
+1. **CLI de noticias→shorts** (`main.py`): noticia / URL / vídeo de YouTube / tendencia
+   → guion → TTS o clip real → vídeo vertical → sube a IG/YT/TikTok.
+2. **App web de Montaje** (`web/` + `api/`): subes una canción + su letra y genera
+   un videoclip por secciones con **fondos de vídeo IA** (ComfyUI local) y la letra
+   **sincronizada con lo que se canta**.
 
-- **Lenguaje:** Python 3
-- **Video:** MoviePy 1.0.3, ffmpeg (requerido en sistema)
-- **Audio:** gTTS (text-to-speech)
-- **Web scraping:** feedparser, requests, BeautifulSoup4
-- **YouTube:** `youtube-transcript-api`
-- **Deploy:** Docker (`docker-compose.yml`, `docker-compose.prod.yml`, `docker-compose.cpu.yml`)
+Rama de trabajo actual: **`fix/local-reel-builder-and-encoding`** (todo el Montaje
+con vídeo IA, la sincronía de letra, y la integración con AI Studio viven aquí).
 
-## Uso
+## Arranque
 
 ```bash
-python3 main.py --tema tecnologia
-python3 main.py --tema "elecciones en argentina" --cantidad 3
-python3 main.py --variado                          # mezcla temas
-python3 main.py --url https://ejemplo.com/noticia  # URL directa
-python3 main.py --youtube https://youtu.be/ID      # desde YouTube
-python3 main.py --trending-yt --pais AR --cantidad 3
-python3 main.py --trending --pais ES               # Google Trends
+docker compose up -d          # backend :8000, frontend :3000, whatsapp :3002
+# o sin Docker:
+bash start.sh
 ```
+
+- **Frontend** Next.js → http://localhost:3000  (Montaje en `/montaje`)
+- **Backend** FastAPI (`api/server.py`) → http://localhost:8000
+- **WhatsApp sidecar** (QR para publicar) → http://localhost:3002  (mapea a :3001 interno;
+  el :3001 del host lo ocupa `open-webui` del proyecto AI Studio)
+
+CLI:
+```bash
+python3 main.py --tema tecnologia
+python3 main.py --youtube https://youtu.be/ID      # reel musical: usa el vídeo real
+python3 main.py --trending-yt --pais AR --cantidad 3
+```
+
+## El Montaje con vídeo IA (`/montaje`)
+
+Flujo (código en `lyric_video_builder.py` + `comfy_video_builder.py`, endpoints en
+`api/music_clip.py`):
+
+1. Un **LLM** (LM Studio del host → Claude → Gemini) lee la letra y escribe un
+   guion visual: `style_prefix` + una escena por sección (`image_prompt` +
+   `motion_prompt`). `plan_escenas()` tolera JSON malformado del modelo
+   (`_json_lenient` + reintento de auto-corrección).
+2. **Sincronía de la letra** (`lyric_aligner.py`): si pegas un `.lrc` se usa tal
+   cual (exacto); si no, `faster-whisper` (`WHISPER_MODEL`, def. `small`, CPU)
+   transcribe y alinea contra la letra real con `difflib`. Idioma: `"auto"` por
+   defecto (selector en la UI). Si <25% de palabras casan → reparto uniforme y la
+   UI avisa en amarillo. Prefiere la pista a cappella si se sube.
+3. **Fondo de cada sección** con el **ComfyUI local** (`host.docker.internal:8188`):
+   - `wan22` (def.): frame con Flux → animación Wan2.2 I2V (LoRA Lightning, 4 pasos).
+   - `ltx`: LTX-Video 2B, más rápido.
+   - `fal`: API de pago (si `FAL_KEY`).
+   - `imagen`: Pollinations + Ken Burns, sin ComfyUI.
+   Tras escribir el guion se **descarga LM Studio** (vía Centro de Control) para
+   dejarle la VRAM a ComfyUI — era la causa nº1 de que ComfyUI crasheara a mitad.
+4. Si una sección falla, cae a imagen fija **sin abortar** y deja marca
+   `<clip>.imagen`; al **▶ Reanudar** se reintenta como vídeo.
+5. Se ensambla `<slug>_full_reel.mp4` (crossfade 0,4 s sin descuadrar el audio).
+
+**Job control**: `POST /api/music-clip/jobs/{id}/cancel`, `GET /api/music-clip/reanudables`,
+`POST /api/music-clip/reanudar/{slug}` (reusa el plan, salta lo ya hecho). El
+formulario se autoguarda en `localStorage` (`montaje_draft_v1`).
+
+## Integración con AI Studio (Centro de Control)
+
+El backend (Docker) llama al Centro de Control del host (`E:\AI-Studio`, `:8090`)
+por `host.docker.internal`:
+- `POST /api/service/{comfyui,lmstudio}/start` → botón "Arrancar ComfyUI/LM Studio".
+- `POST /api/service/lmstudio/unload` → libera la VRAM del modelo tras el guion.
+Config: `CONTROL_CENTER_URL`, `COMFY_URL`, `LLM_BASE_URL` en `.env`.
+`docker-compose.yml` tiene `extra_hosts: host.docker.internal:host-gateway`.
 
 ## Estructura
 
 ```
-main.py                    # Orquestador principal — entry point
-news_fetcher.py            # Descarga feeds RSS
-article_extractor.py       # Extrae texto de artículos
-news_curator.py            # Selecciona las mejores noticias
-image_pipeline.py          # Genera imágenes para el vídeo
-music_video_builder.py     # Monta vídeos musicales
-lyric_video_builder.py     # Vídeos con letras
-avatar_generator.py        # Avatares para narración
-accounts_manager.py        # Gestión de cuentas redes sociales
-instagram_uploader.py      # Sube a Instagram
-music_analyzer.py          # Análisis de música
-hotspot_manager.py         # Gestión de hotspots de red
-api/                       # API REST del bot
-_library/                  # Biblioteca de clips/música
-_templates/                # Plantillas de vídeo
-_music/                    # Música de fondo
-_uploads/                  # Vídeos generados listos para subir
+main.py                 # CLI noticias→shorts (orquestador, delega en módulos)
+api/                     # FastAPI. server.py monta los routers:
+  music_clip.py          #   Montaje (subida, generar, cancelar, reanudar, estado)
+  article_index.py music.py library.py publish.py templates.py ...
+lyric_video_builder.py   # Montaje: monta el vídeo por secciones + letra
+comfy_video_builder.py   # Montaje: guion LLM + workflows ComfyUI + Centro de Control
+lyric_aligner.py         # Montaje: sincronía letra↔audio (LRC / faster-whisper)
+voice_detector.py        # Montaje: detecta hombre/mujer/mixta (librosa.pyin)
+video_clipper.py         # CLI: recorta trozos reales de un vídeo de YouTube
+local_reel_builder.py    # CLI: montaje del reel en local
+web/app/montaje/page.tsx # UI del Montaje
+scripts/                 # descargar_wan_t2v.sh, descargar_ltx.sh, mantener_despierto.ps1
+output/                  # reels generados + sidecars *_montaje_plan.json / *_montaje_req.json
+_uploads/                # audios subidos al Montaje (persisten)
 ```
 
-## Variables de entorno
+## Reglas / gotchas
+
+- **MoviePy 1.0.3** fijo — no actualizar (la API cambió en v2).
+- **ffmpeg** del sistema, no por pip.
+- Frontend: `next dev --webpack` en `web/package.json` (Turbopack panica con este
+  stack en Docker). No cambiar a turbopack.
+- Routers FastAPI que devuelven listas: `@router.get("")`, **nunca** `@router.get("/")`
+  (el 307 a URL absoluta `http://backend:8000` rompe el proxy del navegador).
+- `docker-compose.yml`: `WATCHPACK_POLLING`/`CHOKIDAR_USEPOLLING` en frontend
+  (Windows+bind-mount no propaga inotify); `WHISPER_MODEL`, `hf_cache` volume.
+- `web/next.config.ts`: `allowedDevOrigins: ["127.0.0.1"]` (sin esto, abrir la app
+  en 127.0.0.1 en vez de localhost la deja sin hidratar → los clics no hacen nada).
+- `web/app/layout.tsx`: `suppressHydrationWarning` en html/body (extensiones del
+  navegador inyectan atributos).
+- `yt-dlp` pineado `>=2026.08.19`, cliente `android_vr` excluido, `deno` como JS
+  runtime — ver la memoria del proyecto si vuelven los 403 de YouTube.
+- ComfyUI retiene VRAM: no generar canciones con ACE-Step del AI Studio mientras
+  ComfyUI esté abierto.
+
+## Variables de entorno (ver `.env.example`)
 
 ```
-# Instagram
-INSTAGRAM_USERNAME=
-INSTAGRAM_PASSWORD=
-# YouTube Data API (opcional, para trending)
-YOUTUBE_API_KEY=
-# Otros según módulos activos
+COMFY_URL=http://host.docker.internal:8188
+LLM_BASE_URL=http://host.docker.internal:1234/v1
+CONTROL_CENTER_URL=http://host.docker.internal:8090
+WHISPER_MODEL=small              # base | small | medium
+MONTAJE_XFADE=0.4                # crossfade entre secciones
+MONTAJE_NO_LIBERAR_LM=1          # no descargar LM Studio durante el montaje
+FAL_KEY= / FAL_MODEL=            # generador de vídeo de pago (opcional)
+ANTHROPIC_API_KEY / GEMINI_API_KEY   # LLM de reserva para el guion
+INSTAGRAM_USERNAME / INSTAGRAM_PASSWORD / YOUTUBE_API_KEY
 ```
 
-## Reglas clave
+## Producción
 
-- `main.py` es el orquestador — no contiene lógica, delega a los módulos
-- MoviePy **versión 1.0.3** fija — no actualizar, la API cambió en v2
-- ffmpeg debe estar instalado en el sistema (no via pip)
-- Los vídeos generados van a `_uploads/` antes de subirse
-- Para producción usar `docker-compose.prod.yml`
+`docker-compose.prod.yml`. El Montaje con vídeo IA necesita siempre el ComfyUI
+del host (AI Studio), esté donde esté el backend.
