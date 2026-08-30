@@ -22,10 +22,14 @@ interface JobState {
   voces?: { tipo?: string; f0_mediana?: number; fuente?: string } | null;
 }
 
+const DRAFT_KEY = "montaje_draft_v1";
+
 export default function MontajePage() {
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioPath, setAudioPath] = useState<string>("");
+  const [audioName, setAudioName] = useState<string>("");
   const [uploading, setUploading] = useState(false);
+  const [draftRestaurado, setDraftRestaurado] = useState(false);
   const [letra, setLetra] = useState("");
   const [letraLrc, setLetraLrc] = useState("");
   const [artista, setArtista] = useState("");
@@ -58,6 +62,51 @@ export default function MontajePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const draftCargado = useRef(false);
+
+  // ── Borrador: recupera el formulario si la página se recargó o se colgó ──────
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d.letra) setLetra(d.letra);
+        if (d.letraLrc) setLetraLrc(d.letraLrc);
+        if (d.artista) setArtista(d.artista);
+        if (d.titulo) setTitulo(d.titulo);
+        if (d.estilo) setEstilo(d.estilo);
+        if (d.aspect) setAspect(d.aspect);
+        if (d.provider) setProvider(d.provider);
+        if (d.voz) setVoz(d.voz);
+        if (typeof d.mostrarLetra === "boolean") setMostrarLetra(d.mostrarLetra);
+        if (typeof d.mostrarCabecera === "boolean") setMostrarCabecera(d.mostrarCabecera);
+        if (d.audioPath) { setAudioPath(d.audioPath); setAudioName(d.audioName || "audio restaurado"); }
+        if (d.vozPath) setVozPath(d.vozPath);
+        if (d.letra || d.audioPath || d.titulo) setDraftRestaurado(true);
+      }
+    } catch { /* localStorage no disponible */ }
+    draftCargado.current = true;
+  }, []);
+
+  // Guarda el borrador en cada cambio (después de la primera carga).
+  useEffect(() => {
+    if (!draftCargado.current) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        letra, letraLrc, artista, titulo, estilo, aspect, provider, voz,
+        mostrarLetra, mostrarCabecera, audioPath, audioName, vozPath,
+      }));
+    } catch { /* cuota / modo privado */ }
+  }, [letra, letraLrc, artista, titulo, estilo, aspect, provider, voz,
+      mostrarLetra, mostrarCabecera, audioPath, audioName, vozPath]);
+
+  const descartarBorrador = () => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* */ }
+    setLetra(""); setLetraLrc(""); setArtista(""); setTitulo("");
+    setAudioFile(null); setAudioPath(""); setAudioName("");
+    setVozFile(null); setVozPath("");
+    setDraftRestaurado(false);
+  };
 
   // Estado de las herramientas (ComfyUI, LM Studio, modelos) + generadores
   const cargarEstado = () => {
@@ -113,7 +162,14 @@ export default function MontajePage() {
         if (res.ok) {
           const data: JobState = await res.json();
           setJob(data);
-          if (data.status !== "running") { clearInterval(pollRef.current!); cargarReanudables(); }
+          if (data.status !== "running") {
+            clearInterval(pollRef.current!);
+            cargarReanudables();
+            if (data.status === "completed") {
+              try { localStorage.removeItem(DRAFT_KEY); } catch { /* */ }
+              setDraftRestaurado(false);
+            }
+          }
         }
       } catch { /* retry */ }
     }, 2500);
@@ -134,8 +190,10 @@ export default function MontajePage() {
 
   async function handleAudioSelect(file: File) {
     setAudioFile(file);
+    setAudioName(file.name);
     setAudioPath("");
     setError("");
+    setDraftRestaurado(false);
     setUploading(true);
 
     try {
@@ -152,6 +210,7 @@ export default function MontajePage() {
     } catch (e) {
       setError(`Error subiendo audio: ${e}`);
       setAudioFile(null);
+      setAudioName("");
     } finally {
       setUploading(false);
     }
@@ -252,17 +311,35 @@ export default function MontajePage() {
 
         <div className="space-y-5">
 
+          {draftRestaurado && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10, fontSize: 12,
+              background: "#12233a", border: "1px solid #2c4a6e", borderRadius: 10, padding: "8px 12px",
+            }}>
+              <span style={{ flex: 1 }}>
+                📝 Recuperé lo que tenías escrito (letra, título, audio…) de la última vez.
+              </span>
+              <button
+                onClick={descartarBorrador}
+                style={{ fontSize: 12, padding: "4px 10px", borderRadius: 8, cursor: "pointer",
+                  background: "none", border: "1px solid #2c4a6e", color: "var(--muted)" }}
+              >
+                Empezar de cero
+              </button>
+            </div>
+          )}
+
           {/* ── Audio upload ─── */}
           <Section title="Tu canción">
             <div
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
-              onClick={() => !audioFile && fileInputRef.current?.click()}
+              onClick={() => !(audioFile || audioPath) && fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${dragging ? "var(--accent)" : audioFile ? "var(--success)" : "var(--border)"}`,
+                border: `2px dashed ${dragging ? "var(--accent)" : (audioFile || audioPath) ? "var(--success)" : "var(--border)"}`,
                 borderRadius: 12, padding: "24px 20px", textAlign: "center",
-                cursor: audioFile ? "default" : "pointer",
+                cursor: (audioFile || audioPath) ? "default" : "pointer",
                 background: dragging ? "rgba(99,102,241,0.07)" : "var(--surface2)",
                 transition: "all 0.2s",
               }}
@@ -276,13 +353,14 @@ export default function MontajePage() {
               />
               {uploading ? (
                 <p style={{ color: "var(--muted)", fontSize: 14 }}>⟳ Subiendo audio…</p>
-              ) : audioFile ? (
+              ) : (audioFile || audioPath) ? (
                 <div>
                   <p style={{ fontSize: 15, fontWeight: 700, color: "var(--success)", marginBottom: 4 }}>
-                    ✓ {audioFile.name}
+                    ✓ {audioFile?.name || audioName || "audio cargado"}
                   </p>
                   <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                    {(audioFile.size / 1024 / 1024).toFixed(1)} MB
+                    {audioFile ? `${(audioFile.size / 1024 / 1024).toFixed(1)} MB`
+                      : "recuperado del borrador — sigue en el servidor"}
                   </p>
                   {audioPath && (
                     <audio
@@ -293,7 +371,7 @@ export default function MontajePage() {
                     />
                   )}
                   <button
-                    onClick={(e) => { e.stopPropagation(); setAudioFile(null); setAudioPath(""); }}
+                    onClick={(e) => { e.stopPropagation(); setAudioFile(null); setAudioPath(""); setAudioName(""); }}
                     style={{ display: "block", margin: "10px auto 0", fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}
                   >
                     ✕ Cambiar archivo
