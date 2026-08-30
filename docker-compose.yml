@@ -28,6 +28,10 @@ services:
     environment:
       # Apunta al venv CUDA construido en la imagen (fuera de /app)
       - SADTALKER_VENV=/opt/sadtalker_venv
+      # Modelo de faster-whisper para sincronizar la letra con el audio.
+      # 'small' (~460 MB, se baja solo la 1a vez al volumen hf_cache) transcribe
+      # letra sobre música bastante mejor que 'base'. 'medium' aún mejor pero lento.
+      - WHISPER_MODEL=small
     # El Montaje con vídeo IA llama al ComfyUI y a LM Studio del host
     # (E:\AI-Studio) por host.docker.internal — ver COMFY_URL / LLM_BASE_URL.
     extra_hosts:

@@ -32,6 +32,7 @@ export default function MontajePage() {
   const [draftRestaurado, setDraftRestaurado] = useState(false);
   const [letra, setLetra] = useState("");
   const [letraLrc, setLetraLrc] = useState("");
+  const [idioma, setIdioma] = useState("auto");
   const [artista, setArtista] = useState("");
   const [titulo, setTitulo] = useState("");
   const [estilo, setEstilo] = useState("cinematico");
@@ -72,6 +73,7 @@ export default function MontajePage() {
         const d = JSON.parse(raw);
         if (d.letra) setLetra(d.letra);
         if (d.letraLrc) setLetraLrc(d.letraLrc);
+        if (d.idioma) setIdioma(d.idioma);
         if (d.artista) setArtista(d.artista);
         if (d.titulo) setTitulo(d.titulo);
         if (d.estilo) setEstilo(d.estilo);
@@ -93,11 +95,11 @@ export default function MontajePage() {
     if (!draftCargado.current) return;
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
-        letra, letraLrc, artista, titulo, estilo, aspect, provider, voz,
+        letra, letraLrc, idioma, artista, titulo, estilo, aspect, provider, voz,
         mostrarLetra, mostrarCabecera, audioPath, audioName, vozPath,
       }));
     } catch { /* cuota / modo privado */ }
-  }, [letra, letraLrc, artista, titulo, estilo, aspect, provider, voz,
+  }, [letra, letraLrc, idioma, artista, titulo, estilo, aspect, provider, voz,
       mostrarLetra, mostrarCabecera, audioPath, audioName, vozPath]);
 
   const descartarBorrador = () => {
@@ -270,6 +272,7 @@ export default function MontajePage() {
           modo_fondo: modoVideo ? "video" : "imagen",
           provider,
           aspect,
+          idioma,
           voz: modoVideo ? voz : "auto",
           pista_voz_path: modoVideo && voz !== "hombre" && vozPath ? vozPath : null,
         }),
@@ -464,6 +467,25 @@ export default function MontajePage() {
                 el audio. Con voz a cappella (abajo) la sincronía es mejor.
               </p>
             </details>
+
+            <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              <label style={{ fontSize: 12, color: "var(--muted)" }}>Idioma de la letra</label>
+              <select
+                value={idioma}
+                onChange={(e) => setIdioma(e.target.value)}
+                style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12 }}
+              >
+                <option value="auto">Detectar automáticamente</option>
+                <option value="es">Español</option>
+                <option value="en">Inglés</option>
+                <option value="pt">Portugués</option>
+                <option value="fr">Francés</option>
+                <option value="it">Italiano</option>
+              </select>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                (para transcribir bien y sincronizar la letra)
+              </span>
+            </div>
           </Section>
 
           {/* ── Estilo visual ─── */}
@@ -795,12 +817,15 @@ function JobPanel({ job, onPublish, onCancel }: { job: JobState; onPublish: (f: 
             </p>
           )}
           {job.status === "completed" && (
-            <p style={{ fontSize: 11, color: "var(--muted)", margin: "3px 0 0" }}>
+            <p style={{
+              fontSize: 11, margin: "3px 0 0",
+              color: job.sync_letra === "uniforme" ? "#d0a020" : "var(--muted)",
+            }}>
               {job.sync_letra === "lrc"
-                ? "Letra sincronizada por LRC (exacta)"
+                ? "✓ Letra sincronizada por LRC (exacta)"
                 : job.sync_letra === "whisper"
-                ? "Letra sincronizada con el audio (Whisper)"
-                : "Letra repartida uniformemente (sin sincronía fina)"}
+                ? "✓ Letra sincronizada con el audio (Whisper)"
+                : "⚠️ No se pudo sincronizar la letra con el audio — está repartida a ojo. Para sincronía real: pega un .lrc o sube la voz a cappella, y comprueba el idioma."}
               {job.voces?.tipo && job.voces.tipo !== "manual"
                 ? ` · voz: ${job.voces.tipo}${job.voces.f0_mediana ? ` (${job.voces.f0_mediana} Hz)` : ""}`
                 : ""}

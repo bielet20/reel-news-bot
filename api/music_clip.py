@@ -86,7 +86,7 @@ class MusicClipRequest(BaseModel):
     pista_voz_path: Optional[str] = None  # a cappella opcional para el lip-sync
     aspect: str = "16:9"           # "16:9" (horizontal, default) | "9:16" (reel)
     letra_lrc: Optional[str] = None  # letra en formato .lrc (tiempos exactos)
-    idioma: str = "es"               # idioma de la letra (para Whisper)
+    idioma: str = "auto"             # "auto" (Whisper detecta) | "es" | "en" | ...
 
 
 def _slug_de(req: MusicClipRequest) -> str:

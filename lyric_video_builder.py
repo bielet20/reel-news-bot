@@ -614,7 +614,10 @@ def generar_clips(
 
         slug_i = re.sub(r"[^\w]", "_", sec["label"].lower())[:18]
         ruta_prev = f"{ruta_salida_base}_{i + 1:02d}_{slug_i}_reel.mp4"
+        marca_fallback = ruta_prev + ".imagen"
         # Reanudar: si el MP4 de esta sección ya existe y dura lo esperado, se salta.
+        # EXCEPTO si se hizo con imagen fija porque ComfyUI falló y ahora sí
+        # queremos vídeo: en ese caso se regenera.
         if os.path.exists(ruta_prev):
             try:
                 from comfy_video_builder import probe_duration
@@ -622,13 +625,18 @@ def generar_clips(
             except Exception:  # noqa: BLE001
                 d_prev = 0.0
             esperado = t_fin - t_ini
-            if d_prev > 1.0 and abs(d_prev - esperado) <= max(2.0, esperado * 0.35):
+            dur_ok = d_prev > 1.0 and abs(d_prev - esperado) <= max(2.0, esperado * 0.35)
+            reintenta_video = usar_video and os.path.exists(marca_fallback)
+            if dur_ok and not reintenta_video:
                 print(f"[LyricVideo] sección {i + 1} ya hecha ({Path(ruta_prev).name}); se salta.")
                 rutas.append(ruta_prev)
                 duraciones.append(d_prev)
                 plan_actual["secciones_hechas"] = max(plan_actual["secciones_hechas"], i + 1)
                 _guardar_plan(ruta_salida_base, plan_actual)
                 continue
+            if dur_ok and reintenta_video:
+                print(f"[LyricVideo] sección {i + 1} se había hecho con imagen fija "
+                      f"(ComfyUI falló); se reintenta el vídeo IA.")
 
         def _prog(label_extra: str = ""):
             if cb_progreso:
@@ -645,6 +653,7 @@ def generar_clips(
         dur_v = dur
 
         fondo = None
+        uso_fallback = False
         seccion_cantada = bool(sec["lineas"])
 
         # ── Fondo con vídeo IA (ComfyUI) ─────────────────────────────────────
@@ -690,6 +699,7 @@ def generar_clips(
 
         # ── Fallback: imagen fija AI + Ken Burns ─────────────────────────────
         if fondo is None:
+            uso_fallback = usar_video  # sólo es "fallback" si queríamos vídeo
             _prog("imagen fija")
             img_arr = _imagen_seccion(
                 "\n".join(sec["lineas"]), artista, estilo, seed=i * 19 + 7, W=W, H=H
@@ -739,7 +749,18 @@ def generar_clips(
         except Exception:
             pass
 
-        print(f"[LyricVideo] {i + 1}/{len(secciones)} → {Path(ruta_out).name}")
+        # Marcador para poder reintentar el vídeo en una reanudación si esta
+        # sección salió con imagen fija por un fallo de ComfyUI.
+        try:
+            if uso_fallback:
+                Path(ruta_out + ".imagen").touch()
+            else:
+                Path(ruta_out + ".imagen").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+        print(f"[LyricVideo] {i + 1}/{len(secciones)} → {Path(ruta_out).name}"
+              f"{'  (imagen fija — ComfyUI falló)' if uso_fallback else ''}")
         rutas.append(ruta_out)
         duraciones.append(dur)
         plan_actual["secciones_hechas"] = max(plan_actual["secciones_hechas"], i + 1)

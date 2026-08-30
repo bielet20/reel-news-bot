@@ -72,7 +72,9 @@ def _get_model():
     global _MODEL
     if _MODEL is None:
         from faster_whisper import WhisperModel
-        tam = os.getenv("WHISPER_MODEL", "base")
+        # 'small' transcribe letra sobre música bastante mejor que 'base' y sigue
+        # siendo viable en CPU. 'medium' es aún mejor pero ~3x más lento.
+        tam = os.getenv("WHISPER_MODEL", "small")
         _MODEL = WhisperModel(tam, device="cpu", compute_type="int8")
     return _MODEL
 
@@ -80,16 +82,25 @@ def _get_model():
 def _palabras_whisper(audio_path: str, idioma: str) -> list[tuple[str, float]]:
     """[(palabra_normalizada, start), ...] de la transcripción del audio."""
     model = _get_model()
-    kw = {"word_timestamps": True, "vad_filter": True}
+    kw = {
+        "word_timestamps": True,
+        "vad_filter": True,
+        # Menos alucinación en los tramos instrumentales / repetidos.
+        "condition_on_previous_text": False,
+        "beam_size": 5,
+    }
     if idioma and idioma != "auto":
         kw["language"] = idioma
-    segments, _info = model.transcribe(audio_path, **kw)
+    segments, info = model.transcribe(audio_path, **kw)
     palabras = []
     for seg in segments:
         for w in (seg.words or []):
             n = _norm(w.word)
             if n:
                 palabras.append((n, float(w.start)))
+    lang = getattr(info, "language", "?")
+    prob = getattr(info, "language_probability", 0.0) or 0.0
+    print(f"[LyricAligner] whisper: idioma={lang} (p={prob:.2f}), {len(palabras)} palabras transcritas.")
     return palabras
 
 
