@@ -178,12 +178,49 @@ def alinear_con_whisper(audio_path: str, letra: str, idioma: str = "es") -> list
     return res
 
 
+def _separar_voz(audio_path: str) -> str | None:
+    """Pide al Centro de Control (AI Studio, :8090) que aísle la voz con demucs
+    (GPU) y devuelve la ruta al stem de voz. Transcribir sobre voz limpia da
+    timings mucho más exactos que sobre la mezcla. Desactivable con
+    MONTAJE_NO_SEPARAR_VOZ=1."""
+    if os.getenv("MONTAJE_NO_SEPARAR_VOZ"):
+        return None
+    cc = os.getenv("CONTROL_CENTER_URL", "http://host.docker.internal:8090").rstrip("/")
+    try:
+        import requests
+        with open(audio_path, "rb") as f:
+            r = requests.post(f"{cc}/api/separate",
+                              files={"file": (os.path.basename(audio_path), f)},
+                              timeout=900)
+        if r.status_code != 200 or not r.content:
+            print(f"[LyricAligner] separación de voz no disponible ({r.status_code}); "
+                  f"se transcribe la mezcla.")
+            return None
+        import tempfile
+        dest = os.path.join(tempfile.gettempdir(), f"voz_{os.getpid()}_{os.path.basename(audio_path)}.wav")
+        with open(dest, "wb") as f:
+            f.write(r.content)
+        print("[LyricAligner] voz aislada con demucs para sincronizar.")
+        return dest
+    except Exception as e:  # noqa: BLE001
+        print(f"[LyricAligner] no se pudo aislar la voz ({e}); se transcribe la mezcla.")
+        return None
+
+
 def alinear_letra(audio_path: str, letra: str, idioma: str = "es",
-                  lrc: str | None = None) -> list[dict] | None:
-    """Punto de entrada. Prioriza LRC; si no, Whisper. None => reparto uniforme."""
+                  lrc: str | None = None, ya_es_voz: bool = False) -> list[dict] | None:
+    """Punto de entrada. Prioriza LRC; si no, aísla la voz y transcribe con
+    Whisper. None => reparto uniforme.
+
+    ya_es_voz: True si `audio_path` ya es una pista a cappella (no separar)."""
     if lrc and lrc.strip():
         got = parse_lrc(lrc)
         if got:
             print(f"[LyricAligner] usando LRC ({len(got)} líneas).")
             return got
-    return alinear_con_whisper(audio_path, letra, idioma)
+    audio = audio_path
+    if not ya_es_voz:
+        voz = _separar_voz(audio_path)
+        if voz:
+            audio = voz
+    return alinear_con_whisper(audio, letra, idioma)

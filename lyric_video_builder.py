@@ -87,6 +87,57 @@ def _frame_texto_wh(W: int, H: int, texto: str, font_path: str, tam_fuente: int,
 
     return img
 
+
+# Color de la línea que suena ahora (relleno karaoke). Naranja cálido por defecto.
+KARAOKE_COLOR = (255, 200, 70, 255)
+KARAOKE_DIM = (225, 225, 225, 160)
+
+
+def _frame_karaoke(W: int, H: int, prev: str, cur: str, nxt: str,
+                   tam: int, y_centro: int) -> Image.Image:
+    """3 líneas apiladas: la anterior y la siguiente en gris tenue, la que se
+    está cantando resaltada en color y un poco más grande. Estilo 'línea actual
+    resaltada' (no relleno palabra a palabra)."""
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    max_ancho = int(W * 0.88)
+
+    f_dim = ImageFont.truetype(FONT_REGULAR, int(tam * 0.7))
+    f_cur = ImageFont.truetype(FONT_BOLD, tam)
+
+    filas: list[tuple[str, ImageFont.FreeTypeFont, tuple]] = []
+    for txt in _envolver_texto(draw, prev, f_dim, max_ancho) if prev else []:
+        filas.append((txt, f_dim, KARAOKE_DIM))
+    cur_lineas = _envolver_texto(draw, cur, f_cur, max_ancho) if cur else []
+    for txt in cur_lineas:
+        filas.append((txt, f_cur, KARAOKE_COLOR))
+    for txt in _envolver_texto(draw, nxt, f_dim, max_ancho) if nxt else []:
+        filas.append((txt, f_dim, KARAOKE_DIM))
+    if not filas:
+        return img
+
+    gap = int(tam * 0.35)
+    alturas = [draw.textbbox((0, 0), t, font=fn)[3] + gap for t, fn, _ in filas]
+    y = y_centro - sum(alturas) // 2
+
+    # Caja de fondo semitransparente detrás de todo el bloque
+    anchos = [draw.textbbox((0, 0), t, font=fn)[2] for t, fn, _ in filas]
+    caja = max(anchos) + 80
+    draw.rounded_rectangle(
+        [(W - caja) // 2, y - 24, (W + caja) // 2, y + sum(alturas) + 8],
+        radius=28, fill=(0, 0, 0, 165),
+    )
+
+    for (txt, fn, col), h in zip(filas, alturas):
+        bb = draw.textbbox((0, 0), txt, font=fn)
+        x = (W - (bb[2] - bb[0])) // 2
+        # Sombra suave para legibilidad sobre el vídeo
+        draw.text((x + 2, y + 2), txt, font=fn, fill=(0, 0, 0, 160))
+        draw.text((x, y), txt, font=fn, fill=col)
+        y += h
+
+    return img
+
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 CACHE_DIR = Path(__file__).parent / "_img_cache"
@@ -271,9 +322,14 @@ def _clips_letra(lineas: list[str], dur: float, W: int, H: int,
             fin = min(max(fin, ini + 0.4), dur)
             if fin <= ini:
                 continue
-            img = _frame_texto_wh(W, H, linea, FONT_BOLD, tam, y_centro=int(H * 0.82),
-                                  max_ancho=int(W * 0.85), max_lineas=3)
-            fade = min(0.18, (fin - ini) / 5)
+            img = _frame_karaoke(
+                W, H,
+                prev=lineas[j - 1] if j > 0 else "",
+                cur=linea,
+                nxt=lineas[j + 1] if j + 1 < len(lineas) else "",
+                tam=tam, y_centro=int(H * 0.80),
+            )
+            fade = min(0.15, (fin - ini) / 6)
             clips.append(
                 ImageClip(np.array(img)).set_start(ini).set_duration(fin - ini)
                 .crossfadein(fade).crossfadeout(fade)
@@ -473,8 +529,10 @@ def generar_clips(
             import lyric_aligner
             if cb_progreso:
                 cb_progreso(0, len(secciones), "Sincronizando letra con el audio…")
-            audio_para_alinear = pista_voz if (pista_voz and os.path.exists(pista_voz)) else ruta_audio
-            alineado = lyric_aligner.alinear_letra(audio_para_alinear, letra, idioma, letra_lrc)
+            tiene_acapella = bool(pista_voz and os.path.exists(pista_voz))
+            audio_para_alinear = pista_voz if tiene_acapella else ruta_audio
+            alineado = lyric_aligner.alinear_letra(
+                audio_para_alinear, letra, idioma, letra_lrc, ya_es_voz=tiene_acapella)
             if alineado:
                 it = iter(alineado)
                 lineas_ts_seccion = []

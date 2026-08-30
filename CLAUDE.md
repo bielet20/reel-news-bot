@@ -41,10 +41,14 @@ Flujo (código en `lyric_video_builder.py` + `comfy_video_builder.py`, endpoints
    `motion_prompt`). `plan_escenas()` tolera JSON malformado del modelo
    (`_json_lenient` + reintento de auto-corrección).
 2. **Sincronía de la letra** (`lyric_aligner.py`): si pegas un `.lrc` se usa tal
-   cual (exacto); si no, `faster-whisper` (`WHISPER_MODEL`, def. `small`, CPU)
-   transcribe y alinea contra la letra real con `difflib`. Idioma: `"auto"` por
-   defecto (selector en la UI). Si <25% de palabras casan → reparto uniforme y la
-   UI avisa en amarillo. Prefiere la pista a cappella si se sube.
+   cual (exacto); si no, se **aísla la voz con demucs** (GPU del host, vía el
+   Centro de Control `POST /api/separate`, ~20 s; `MONTAJE_NO_SEPARAR_VOZ=1` para
+   saltarlo) y `faster-whisper` (`WHISPER_MODEL`, def. `small`) transcribe la voz
+   limpia y alinea contra la letra real con `difflib`. Idioma `"auto"` (selector
+   en la UI). Si <25% de palabras casan → reparto uniforme y la UI avisa en
+   amarillo. Una pista a cappella subida se usa directa (sin separar).
+   Render **tipo karaoke** (`_frame_karaoke`): 3 líneas: la que suena en color
+   grande, la anterior y la siguiente en gris.
 3. **Fondo de cada sección** con el **ComfyUI local** (`host.docker.internal:8188`):
    - `wan22` (def.): frame con Flux → animación Wan2.2 I2V (LoRA Lightning, 4 pasos).
    - `ltx`: LTX-Video 2B, más rápido.
