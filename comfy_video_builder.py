@@ -289,6 +289,35 @@ def extract_json(text: str) -> str:
     return m.group(0) if m else text
 
 
+def _json_lenient(raw: str) -> dict:
+    """json.loads con reparación de los errores típicos de un LLM:
+    comas colgando, comillas simples, claves sin comillas, salida cortada."""
+    blob = extract_json(raw)
+    intentos = [blob]
+
+    # comas colgando antes de } o ]
+    intentos.append(re.sub(r",(\s*[}\]])", r"\1", blob))
+    # comillas simples -> dobles (solo si no hay dobles, para no romper apóstrofos)
+    if '"' not in blob and "'" in blob:
+        intentos.append(re.sub(r"'", '"', blob))
+    # claves sin comillas:  { foo:  ->  { "foo":
+    intentos.append(re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', blob))
+    # salida cortada: reequilibrar llaves/corchetes que falten al final
+    abiertas = blob.count("{") - blob.count("}")
+    cerradas = blob.count("[") - blob.count("]")
+    if abiertas > 0 or cerradas > 0:
+        recorte = re.sub(r",\s*$", "", blob.rstrip())
+        intentos.append(recorte + "]" * max(0, cerradas) + "}" * max(0, abiertas))
+
+    ultimo_err = None
+    for cand in intentos:
+        try:
+            return json.loads(cand)
+        except (json.JSONDecodeError, ValueError) as e:
+            ultimo_err = e
+    raise ultimo_err or ValueError("JSON ilegible")
+
+
 def count_lines_per_section(lyrics: str) -> list[int]:
     """Cuenta líneas cantadas (no vacías, no etiquetas) por cada aparición de
     sección, en orden, para repartir la duración proporcionalmente."""
@@ -309,7 +338,8 @@ def count_lines_per_section(lyrics: str) -> list[int]:
     return counts
 
 
-def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000) -> str:
+def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000,
+                    temperature: float = 0.8, json_mode: bool = False) -> str:
     """Escalera de LLM para planificar escenas. A diferencia de los helpers de
     summarizer.py (max_tokens=600, pensados para un guion corto) aquí hace falta
     espacio para un JSON con una escena por sección."""
@@ -317,17 +347,20 @@ def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000
 
     # 1) LM Studio local (gratis, sin internet) via host.docker.internal
     try:
+        cuerpo = {
+            "model": LLM_MODEL,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if json_mode:
+            cuerpo["response_format"] = {"type": "json_object"}
         r = requests.post(
             f"{LLM_BASE_URL}/chat/completions",
-            json={
-                "model": LLM_MODEL,
-                "temperature": 0.8,
-                "max_tokens": max_tokens,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            },
+            json=cuerpo,
             timeout=300,
         )
         r.raise_for_status()
@@ -457,14 +490,36 @@ def plan_escenas(letra: str, artista: str, titulo: str, estilo_base: str,
         f"Duración total del audio: {dur_total:.0f} segundos\n\n"
         f"Letra:\n{letra}"
     )
-    raw = strip_think(_llm_completion(system, user)).strip()
+    raw = strip_think(_llm_completion(system, user, temperature=0.35, json_mode=True)).strip()
     if not raw:
         raise RuntimeError("El LLM devolvió una respuesta vacía al planificar las escenas.")
-    data = json.loads(extract_json(raw))
+    try:
+        data = _json_lenient(raw)
+    except (json.JSONDecodeError, ValueError) as e1:
+        # Segundo intento: que el propio LLM arregle su JSON.
+        print(f"[LyricVideo] guion: JSON inválido ({e1}); pido corrección al LLM…")
+        reparado = strip_think(_llm_completion(
+            "Devuelve ÚNICAMENTE el JSON corregido y válido, sin explicaciones, "
+            "sin ```. Debe tener las claves style_prefix (string) y scenes (lista "
+            "de objetos con section, image_prompt, motion_prompt).",
+            f"Corrige este JSON:\n\n{raw}",
+            temperature=0.0, json_mode=True,
+        )).strip()
+        try:
+            data = _json_lenient(reparado)
+        except (json.JSONDecodeError, ValueError) as e2:
+            raise RuntimeError(
+                f"El LLM no devolvió un guion en JSON válido ni tras pedir corrección "
+                f"({e2}). Primeras líneas de lo que devolvió:\n{raw[:400]}"
+            ) from e2
 
-    style_prefix = (data.get("style_prefix") or "").strip()
-    scenes = data.get("scenes") or []
-    if not scenes:
+    # El modelo a veces devuelve la lista de escenas pelada, o bajo otra clave.
+    if isinstance(data, list):
+        data = {"scenes": data}
+    style_prefix = (data.get("style_prefix") or data.get("style") or "").strip()
+    scenes = (data.get("scenes") or data.get("escenas")
+              or data.get("shots") or data.get("sections") or [])
+    if not isinstance(scenes, list) or not scenes:
         raise RuntimeError("El LLM no devolvió ninguna escena.")
 
     section_lines = count_lines_per_section(letra)
