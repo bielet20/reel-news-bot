@@ -14,7 +14,7 @@ const ESTILOS = [
 
 interface JobState {
   id: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "cancelled";
   progress: { actual: number; total: number; label: string };
   output_files: string[];
   error: string | null;
@@ -48,6 +48,9 @@ export default function MontajePage() {
   const [vozPath, setVozPath] = useState<string>("");
   const [uploadingVoz, setUploadingVoz] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
+  const [reanudables, setReanudables] = useState<
+    { slug: string; titulo: string; hechas: number; total: number; en_curso: boolean }[]
+  >([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [publishing, setPublishing] = useState<string | null>(null);
@@ -89,6 +92,15 @@ export default function MontajePage() {
     cargarEstado();
   };
 
+  // Montajes a medias que se pueden reanudar (backend/ComfyUI se cortó, o cancelado)
+  const cargarReanudables = () => {
+    fetch("/api/music-clip/reanudables")
+      .then((r) => r.json())
+      .then((d) => setReanudables(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  };
+  useEffect(() => { cargarReanudables(); }, []);
+
   // Poll job status
   useEffect(() => {
     if (!job || job.status !== "running") {
@@ -101,12 +113,24 @@ export default function MontajePage() {
         if (res.ok) {
           const data: JobState = await res.json();
           setJob(data);
-          if (data.status !== "running") clearInterval(pollRef.current!);
+          if (data.status !== "running") { clearInterval(pollRef.current!); cargarReanudables(); }
         }
       } catch { /* retry */ }
     }, 2500);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [job?.id, job?.status]);
+
+  async function reanudarMontaje(slug: string) {
+    setError("");
+    try {
+      const res = await fetch(`/api/music-clip/reanudar/${encodeURIComponent(slug)}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "No se pudo reanudar.");
+      setJob({ id: data.job_id, status: "running", progress: { actual: 0, total: 0, label: "Reanudando…" }, output_files: [], error: null });
+    } catch (e) {
+      setError(`${e}`);
+    }
+  }
 
   async function handleAudioSelect(file: File) {
     setAudioFile(file);
@@ -203,6 +227,12 @@ export default function MontajePage() {
 
   const isRunning = job?.status === "running";
   const hasSections = letra.trim().split(/\n\s*\n/).filter(Boolean).length > 0;
+
+  async function cancelJob() {
+    if (!job) return;
+    setJob({ ...job, progress: { ...job.progress, label: "Parando…" } });
+    await fetch(`/api/music-clip/jobs/${job.id}/cancel`, { method: "POST" }).catch(() => {});
+  }
 
   return (
     <main className="min-h-screen px-4 py-10">
@@ -564,6 +594,30 @@ export default function MontajePage() {
             </p>
           )}
 
+          {/* ── Montajes a medias: reanudar ─── */}
+          {reanudables.filter((r) => !r.en_curso).length > 0 && !isRunning && (
+            <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              {reanudables.filter((r) => !r.en_curso).map((r) => (
+                <div key={r.slug} style={{
+                  display: "flex", alignItems: "center", gap: 10, fontSize: 12,
+                  background: "#12233a", border: "1px solid #2c4a6e", borderRadius: 10, padding: "8px 12px",
+                }}>
+                  <span style={{ flex: 1 }}>
+                    Montaje a medias: <strong>{r.titulo}</strong>
+                    {r.total ? ` — ${r.hechas}/${r.total} secciones` : ""}
+                  </span>
+                  <button
+                    onClick={() => reanudarMontaje(r.slug)}
+                    style={{ fontSize: 12, padding: "5px 12px", borderRadius: 8, cursor: "pointer",
+                      background: "var(--accent)", border: "none", color: "#fff", fontWeight: 600 }}
+                  >
+                    ▶ Reanudar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* ── Botón generar ─── */}
           <button
             onClick={handleGenerate}
@@ -585,7 +639,7 @@ export default function MontajePage() {
         {/* ── Job progress ─── */}
         {job && (
           <div style={{ marginTop: 20 }}>
-            <JobPanel job={job} onPublish={setPublishing} />
+            <JobPanel job={job} onPublish={setPublishing} onCancel={cancelJob} />
           </div>
         )}
 
@@ -623,17 +677,23 @@ que el mundo empieza en ti`}
 
 // ── Job progress panel ────────────────────────────────────────────────────────
 
-function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) => void }) {
+function JobPanel({ job, onPublish, onCancel }: { job: JobState; onPublish: (f: string) => void; onCancel: () => void }) {
   const total = job.progress.total || job.output_files.length;
   const actual = job.progress.actual || job.output_files.length;
   const pct = total > 0 ? Math.round((actual / total) * 100) : 0;
+  const headBg = job.status === "completed" ? "#0a2a1a"
+    : job.status === "failed" ? "#2a0a0a"
+    : job.status === "cancelled" ? "#2a1f0a" : "#0a1a2a";
+  const headColor = job.status === "completed" ? "var(--success)"
+    : job.status === "failed" ? "var(--error)"
+    : job.status === "cancelled" ? "#d0a020" : "#60a5fa";
 
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" }}>
       {/* Header estado */}
       <div style={{
         padding: "14px 18px",
-        background: job.status === "completed" ? "#0a2a1a" : job.status === "failed" ? "#2a0a0a" : "#0a1a2a",
+        background: headBg,
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", gap: 10,
       }}>
@@ -641,12 +701,14 @@ function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) =>
         <div style={{ flex: 1 }}>
           <p style={{
             fontSize: 13, fontWeight: 700, margin: 0,
-            color: job.status === "completed" ? "var(--success)" : job.status === "failed" ? "var(--error)" : "#60a5fa",
+            color: headColor,
           }}>
             {job.status === "running"
               ? job.progress.label || "Generando…"
               : job.status === "completed"
               ? `✓ ${job.output_files.length} clip${job.output_files.length !== 1 ? "s" : ""} generado${job.output_files.length !== 1 ? "s" : ""}`
+              : job.status === "cancelled"
+              ? `⏹ Cancelado — ${job.output_files.length} clip(s) hechos. Usa "▶ Reanudar" arriba para seguir sin repetirlos.`
               : `✕ Error: ${job.error}`}
           </p>
           {job.status === "running" && total > 0 && (
@@ -667,6 +729,18 @@ function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) =>
             </p>
           )}
         </div>
+        {job.status === "running" && (
+          <button
+            onClick={onCancel}
+            style={{
+              fontSize: 12, padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+              background: "#2a0a0a", color: "var(--error)", border: "1px solid #5a2020",
+              fontWeight: 600, flexShrink: 0,
+            }}
+          >
+            Cancelar
+          </button>
+        )}
       </div>
 
       {/* Barra de progreso */}
