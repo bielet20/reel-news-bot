@@ -21,11 +21,17 @@ services:
       - ./_tokens:/app/_tokens
       - ./_config:/app/_config
       - ./assets:/app/assets
+      # Caché de modelos (faster-whisper para sincronizar la letra, etc.)
+      - hf_cache:/root/.cache/huggingface
     env_file:
       - .env
     environment:
       # Apunta al venv CUDA construido en la imagen (fuera de /app)
       - SADTALKER_VENV=/opt/sadtalker_venv
+    # El Montaje con vídeo IA llama al ComfyUI y a LM Studio del host
+    # (E:\AI-Studio) por host.docker.internal — ver COMFY_URL / LLM_BASE_URL.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     # Acceso a la GPU NVIDIA (requiere NVIDIA Container Toolkit)
     deploy:
@@ -42,7 +48,8 @@ services:
       context: ./wa_service
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
+      # 3001 del host lo ocupa open-webui (proyecto AI-Studio); QR en localhost:3002
+      - "3002:3001"
     volumes:
       - wa_auth:/app/.wwebjs_auth
     restart: unless-stopped
@@ -64,6 +71,11 @@ services:
     environment:
       - BACKEND_URL=http://backend:8000
       - NODE_EXTRA_CA_CERTS=${EXTRA_CA_CERT:-}
+      # En Windows + Docker el watcher de ficheros no recibe eventos inotify a
+      # través del bind-mount, así que Next.js no recompila al editar y el
+      # navegador sirve un bundle viejo. El polling lo arregla.
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend
     restart: unless-stopped
@@ -71,3 +83,4 @@ services:
 volumes:
   frontend_modules:
   wa_auth:
+  hf_cache:

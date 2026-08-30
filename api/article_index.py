@@ -108,7 +108,7 @@ async def check_url(url: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/")
+@router.get("")
 async def list_articles(
     limit: int = Query(30, ge=1, le=200),
     offset: int = Query(0, ge=0),

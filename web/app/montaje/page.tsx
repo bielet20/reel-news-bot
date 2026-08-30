@@ -18,6 +18,8 @@ interface JobState {
   progress: { actual: number; total: number; label: string };
   output_files: string[];
   error: string | null;
+  sync_letra?: string;
+  voces?: { tipo?: string; f0_mediana?: number; fuente?: string } | null;
 }
 
 export default function MontajePage() {
@@ -25,11 +27,26 @@ export default function MontajePage() {
   const [audioPath, setAudioPath] = useState<string>("");
   const [uploading, setUploading] = useState(false);
   const [letra, setLetra] = useState("");
+  const [letraLrc, setLetraLrc] = useState("");
   const [artista, setArtista] = useState("");
   const [titulo, setTitulo] = useState("");
   const [estilo, setEstilo] = useState("cinematico");
   const [mostrarLetra, setMostrarLetra] = useState(true);
   const [mostrarCabecera, setMostrarCabecera] = useState(true);
+  const [aspect, setAspect] = useState<"16:9" | "9:16">("16:9");
+  const [proveedores, setProveedores] = useState<{ id: string; label: string; disponible: boolean; nota: string }[]>([]);
+  const [estado, setEstado] = useState<{
+    comfy: boolean; lm_studio: boolean; problemas: string[];
+    control_center?: boolean;
+    arranque?: { activo: boolean; mensaje: string };
+  } | null>(null);
+  const [arrancando, setArrancando] = useState(false);
+  const [provider, setProvider] = useState<string>("wan22");
+  const [voz, setVoz] = useState<"auto" | "hombre" | "mujer" | "mixta">("auto");
+  const modoVideo = provider !== "imagen";
+  const [vozFile, setVozFile] = useState<File | null>(null);
+  const [vozPath, setVozPath] = useState<string>("");
+  const [uploadingVoz, setUploadingVoz] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -38,6 +55,39 @@ export default function MontajePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Estado de las herramientas (ComfyUI, LM Studio, modelos) + generadores
+  const cargarEstado = () => {
+    fetch("/api/music-clip/estado")
+      .then((r) => r.json())
+      .then((e) => {
+        setEstado(e);
+        setProveedores(e.providers || []);
+        setArrancando(Boolean(e.arranque?.activo));
+      })
+      .catch(() => {});
+  };
+  useEffect(() => {
+    cargarEstado();
+    const id = setInterval(cargarEstado, arrancando ? 3000 : 15000);
+    return () => clearInterval(id);
+  }, [arrancando]);
+
+  const arrancarHerramientas = async () => {
+    setArrancando(true);
+    try {
+      const r = await fetch("/api/music-clip/arrancar-herramientas", { method: "POST" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setError(d.detail || "No se pudo arrancar (Centro de Control :8090).");
+        setArrancando(false);
+      }
+    } catch {
+      setError("No se pudo contactar con el backend.");
+      setArrancando(false);
+    }
+    cargarEstado();
+  };
 
   // Poll job status
   useEffect(() => {
@@ -90,6 +140,29 @@ export default function MontajePage() {
     if (file) handleAudioSelect(file);
   }
 
+  async function handleVozSelect(file: File) {
+    setVozFile(file);
+    setVozPath("");
+    setError("");
+    setUploadingVoz(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const backendUrl = typeof window !== "undefined"
+        ? `${window.location.protocol}//${window.location.hostname}:8000`
+        : "http://localhost:8000";
+      const res = await fetch(`${backendUrl}/api/music-clip/upload-audio`, { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setVozPath(data.path);
+    } catch (e) {
+      setError(`Error subiendo la pista de voz: ${e}`);
+      setVozFile(null);
+    } finally {
+      setUploadingVoz(false);
+    }
+  }
+
   async function handleGenerate() {
     if (!audioPath) { setError("Sube una canción primero."); return; }
     if (!letra.trim()) { setError("Añade la letra de la canción."); return; }
@@ -105,11 +178,17 @@ export default function MontajePage() {
         body: JSON.stringify({
           audio_path: audioPath,
           letra,
+          letra_lrc: letraLrc.trim() || null,
           artista,
           titulo,
           estilo,
           mostrar_letra: mostrarLetra,
           mostrar_cabecera: mostrarCabecera,
+          modo_fondo: modoVideo ? "video" : "imagen",
+          provider,
+          aspect,
+          voz: modoVideo ? voz : "auto",
+          pista_voz_path: modoVideo && voz !== "hombre" && vozPath ? vozPath : null,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -136,7 +215,8 @@ export default function MontajePage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Montaje de videoclip</h1>
           <p style={{ color: "var(--muted)", fontSize: 14 }}>
-            Sube tu canción y la letra — generamos clips con imágenes AI sincronizados por secciones.
+            Sube tu canción y la letra — generamos un vídeo por sección (fondos IA
+            relacionados con la letra) y un videoclip completo.
           </p>
         </div>
 
@@ -195,7 +275,7 @@ export default function MontajePage() {
                   <p style={{ fontSize: 14, color: "var(--text)", marginBottom: 4 }}>
                     Arrastra aquí tu canción o <span style={{ color: "var(--accent)" }}>haz clic para seleccionar</span>
                   </p>
-                  <p style={{ fontSize: 12, color: "var(--muted)" }}>MP3, WAV, FLAC, AAC, M4A · máx 50 MB</p>
+                  <p style={{ fontSize: 12, color: "var(--muted)" }}>MP3, WAV, FLAC, AAC, M4A, AIFF · máx 300 MB</p>
                 </>
               )}
             </div>
@@ -228,7 +308,7 @@ export default function MontajePage() {
           {/* ── Letra ─── */}
           <Section
             title="Letra"
-            hint='Separa secciones con línea en blanco, o usa etiquetas como [Verso 1], [Estribillo]'
+            hint='Separa secciones con línea en blanco, o usa etiquetas como [Verso 1], [Estribillo]. La letra se sincroniza sola con el audio (Whisper).'
           >
             <textarea
               value={letra}
@@ -260,6 +340,22 @@ export default function MontajePage() {
                 })}
               </div>
             )}
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ fontSize: 12, color: "var(--muted)", cursor: "pointer", userSelect: "none" }}>
+                ¿Tienes la letra con tiempos (.lrc)? Pégala para sincronía exacta
+              </summary>
+              <textarea
+                value={letraLrc}
+                onChange={(e) => setLetraLrc(e.target.value)}
+                placeholder={`[00:12.30]Primera línea cantada\n[00:15.80]Segunda línea\n[00:19.10]...`}
+                rows={6}
+                style={{ ...inputStyle, marginTop: 8, resize: "vertical", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+              />
+              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                Si lo dejas vacío, la letra de arriba se alinea automáticamente con
+                el audio. Con voz a cappella (abajo) la sincronía es mejor.
+              </p>
+            </details>
           </Section>
 
           {/* ── Estilo visual ─── */}
@@ -283,6 +379,163 @@ export default function MontajePage() {
                   <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{e.desc}</div>
                 </button>
               ))}
+            </div>
+          </Section>
+
+          {/* ── Formato ─── */}
+          <Section title="Formato">
+            <div style={{ display: "flex", gap: 8 }}>
+              {([
+                { id: "16:9", label: "16:9 horizontal", icon: "🖥️", desc: "1920×1080" },
+                { id: "9:16", label: "9:16 vertical", icon: "📱", desc: "1080×1920 (reel)" },
+              ] as const).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setAspect(f.id)}
+                  style={{
+                    flex: 1, padding: "10px 8px", borderRadius: 10, textAlign: "center", cursor: "pointer",
+                    border: `1px solid ${aspect === f.id ? "var(--accent)" : "var(--border)"}`,
+                    background: aspect === f.id ? "rgba(99,102,241,0.12)" : "var(--surface2)",
+                  }}
+                >
+                  <div style={{ fontSize: 20, marginBottom: 2 }}>{f.icon}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: aspect === f.id ? "var(--accent)" : "var(--text)" }}>{f.label}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{f.desc}</div>
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          {/* ── Fondos ─── */}
+          <Section title="Fondos" hint="Un LLM saca un guion visual de la letra; el generador crea un vídeo por sección relacionado con lo que se canta.">
+            {/* Estado de herramientas */}
+            {estado && (
+              <div style={{
+                display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10, fontSize: 11,
+              }}>
+                <span style={{ padding: "3px 9px", borderRadius: 20, background: estado.comfy ? "#0a2a1a" : "#2a0a0a", color: estado.comfy ? "var(--success)" : "var(--error)", border: `1px solid ${estado.comfy ? "#1a5a3a" : "#5a2020"}` }}>
+                  {estado.comfy ? "● ComfyUI activo" : "○ ComfyUI apagado"}
+                </span>
+                <span style={{ padding: "3px 9px", borderRadius: 20, background: estado.lm_studio ? "#0a2a1a" : "#2a1a0a", color: estado.lm_studio ? "var(--success)" : "#d0a020", border: `1px solid ${estado.lm_studio ? "#1a5a3a" : "#5a4020"}` }}>
+                  {estado.lm_studio ? "● LM Studio activo" : "○ LM Studio (opcional)"}
+                </span>
+                {estado.control_center && (!estado.comfy || !estado.lm_studio) && (
+                  <button
+                    onClick={arrancarHerramientas}
+                    disabled={arrancando}
+                    style={{
+                      fontSize: 11, padding: "3px 11px", borderRadius: 20, cursor: arrancando ? "wait" : "pointer",
+                      background: "#12233a", color: "var(--accent, #4c9ffe)", border: "1px solid #2c4a6e",
+                    }}
+                  >
+                    {arrancando ? "⏳ arrancando…" : "▶ Arrancar ComfyUI/LM Studio"}
+                  </button>
+                )}
+                {estado.control_center === false && (
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                    Centro de Control (:8090) apagado — no puedo arrancar desde aquí
+                  </span>
+                )}
+                <button onClick={cargarEstado} style={{ fontSize: 11, background: "none", border: "none", color: "var(--muted)", cursor: "pointer", textDecoration: "underline" }}>
+                  refrescar
+                </button>
+              </div>
+            )}
+            {arrancando && estado?.arranque?.mensaje && (
+              <div style={{ fontSize: 11, color: "var(--accent, #4c9ffe)", marginBottom: 10 }}>
+                {estado.arranque.mensaje}
+              </div>
+            )}
+            {estado && estado.problemas.length > 0 && (
+              <div style={{ fontSize: 11, color: "#d0a020", background: "#2a1a0a", border: "1px solid #5a4020", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+                {estado.problemas.map((p, i) => <div key={i}>⚠️ {p}</div>)}
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(proveedores.length ? proveedores : [
+                { id: "wan22", label: "Wan 2.2 T2V (local)", disponible: false, nota: "Cargando…" },
+                { id: "imagen", label: "Imagen fija (Pollinations)", disponible: true, nota: "" },
+              ]).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setProvider(p.id)}
+                  style={{
+                    textAlign: "left", padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                    border: `1px solid ${provider === p.id ? "var(--accent)" : "var(--border)"}`,
+                    background: provider === p.id ? "rgba(99,102,241,0.12)" : "var(--surface2)",
+                    opacity: p.disponible ? 1 : 0.65,
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600, color: provider === p.id ? "var(--accent)" : "var(--text)" }}>
+                    {provider === p.id ? "● " : "○ "}{p.label}
+                    {!p.disponible && <span style={{ color: "var(--error)", fontWeight: 400 }}> · no listo</span>}
+                  </div>
+                  {p.nota && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{p.nota}</div>}
+                </button>
+              ))}
+              {provider !== "imagen" && !proveedores.find((p) => p.id === provider)?.disponible && (
+                <p style={{ fontSize: 11, color: "var(--error)", margin: "2px 0 0" }}>
+                  Este generador no está listo — si generas ahora, el job fallará con el motivo. Arréglalo o elige «Imagen fija».
+                </p>
+              )}
+              {modoVideo && (
+                <div style={{ marginTop: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", display: "block", marginBottom: 6 }}>
+                    Voz de la canción
+                  </label>
+                  <select
+                    value={voz}
+                    onChange={(e) => setVoz(e.target.value as typeof voz)}
+                    style={{
+                      width: "100%", padding: "8px 10px", borderRadius: 8,
+                      border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text)",
+                    }}
+                  >
+                    <option value="auto">Detectar automáticamente</option>
+                    <option value="mujer">Mujer</option>
+                    <option value="hombre">Hombre</option>
+                    <option value="mixta">Mixta (dúo hombre + mujer)</option>
+                  </select>
+                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0" }}>
+                    Pone a quien canta en pantalla y le sincroniza los labios con la letra (LatentSync).
+                    En “auto” el sistema analiza el tono de voz.
+                  </p>
+                </div>
+              )}
+              {modoVideo && voz !== "hombre" && (
+                <div style={{
+                  border: `2px dashed ${vozFile ? "var(--success)" : "var(--border)"}`,
+                  borderRadius: 10, padding: "14px", textAlign: "center", background: "var(--surface2)",
+                }}>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    id="voz-acapella"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVozSelect(f); }}
+                  />
+                  {uploadingVoz ? (
+                    <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>⟳ Subiendo…</p>
+                  ) : vozFile ? (
+                    <p style={{ fontSize: 12, color: "var(--success)", margin: 0 }}>
+                      ✓ {vozFile.name}
+                      <button
+                        onClick={() => { setVozFile(null); setVozPath(""); }}
+                        style={{ marginLeft: 8, fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}
+                      >
+                        ✕ quitar
+                      </button>
+                    </p>
+                  ) : (
+                    <label htmlFor="voz-acapella" style={{ fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+                      Pista de voz a cappella <span style={{ color: "var(--muted)" }}>(opcional, mejora el lip-sync)</span> —{" "}
+                      <span style={{ color: "var(--accent)" }}>seleccionar</span>
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
           </Section>
 
@@ -401,6 +654,18 @@ function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) =>
               Clip {actual} de {total}
             </p>
           )}
+          {job.status === "completed" && (
+            <p style={{ fontSize: 11, color: "var(--muted)", margin: "3px 0 0" }}>
+              {job.sync_letra === "lrc"
+                ? "Letra sincronizada por LRC (exacta)"
+                : job.sync_letra === "whisper"
+                ? "Letra sincronizada con el audio (Whisper)"
+                : "Letra repartida uniformemente (sin sincronía fina)"}
+              {job.voces?.tipo && job.voces.tipo !== "manual"
+                ? ` · voz: ${job.voces.tipo}${job.voces.f0_mediana ? ` (${job.voces.f0_mediana} Hz)` : ""}`
+                : ""}
+            </p>
+          )}
         </div>
       </div>
 
@@ -426,7 +691,9 @@ function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) =>
                 {/* Label */}
                 <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
-                    Clip {i + 1} — {filename.replace(/_reel\.mp4$/, "").replace(/_/g, " ")}
+                    {/_full_reel\.mp4$/.test(filename)
+                      ? "🎬 Videoclip completo"
+                      : `Clip ${i + 1} — ${filename.replace(/_reel\.mp4$/, "").replace(/_/g, " ")}`}
                   </p>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button

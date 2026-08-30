@@ -30,3 +30,8 @@ google-auth
 google-auth-oauthlib
 # Opcional: para transcribir videos locales con --video (requiere ffmpeg)
 # openai-whisper
+# Sincroniza la letra con el audio en el Montaje (word timestamps, CPU, sin torch).
+# El modelo (~145 MB "base") se baja solo la primera vez a /root/.cache/huggingface
+# (montado como volumen en docker-compose para que persista).
+faster-whisper
+click<8.2
