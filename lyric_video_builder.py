@@ -540,6 +540,13 @@ def generar_clips(
             except Exception as e:  # noqa: BLE001
                 raise RuntimeError(f"No se pudo escribir el guion visual de la letra: {e}") from e
 
+        # El guion ya está escrito; a partir de aquí solo se usa ComfyUI. Liberar
+        # la VRAM de LM Studio evita que ComfyUI se quede sin memoria a mitad
+        # (desactivable con MONTAJE_NO_LIBERAR_LM=1).
+        if provider in ("wan22", "ltx") and not os.getenv("MONTAJE_NO_LIBERAR_LM"):
+            if comfy_video_builder.liberar_lm_studio_vram():
+                print("[LyricVideo] LM Studio descargado para dejar VRAM a ComfyUI.")
+
     tiempos: list[tuple[float, float]] = []
     if _plan and _plan.get("tiempos"):
         tiempos = [(float(a), float(b)) for a, b in _plan["tiempos"]]

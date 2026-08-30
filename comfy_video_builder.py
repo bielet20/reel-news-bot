@@ -145,6 +145,21 @@ def control_center_disponible(timeout: float = 3.0) -> bool:
         return False
 
 
+def liberar_lm_studio_vram() -> bool:
+    """Pide al Centro de Control que descargue el modelo de LM Studio (libera
+    ~5 GB de VRAM). Se llama tras escribir el guion visual: el resto del montaje
+    solo necesita ComfyUI, y LM Studio ocupando VRAM es la causa nº1 de que
+    ComfyUI se quede sin memoria a mitad y todo caiga a imagen fija. El servidor
+    de LM Studio sigue en pie y recarga solo en la siguiente petición."""
+    if not control_center_disponible():
+        return False
+    try:
+        r = requests.post(f"{CONTROL_CENTER_URL}/api/service/lmstudio/unload", timeout=30)
+        return bool(r.ok and r.json().get("ok"))
+    except (requests.exceptions.RequestException, ValueError):
+        return False
+
+
 def arrancar_via_control_center(servicios: list[str], timeout: float = 180.0) -> dict:
     """Pide al Centro de Control que encienda los servicios indicados
     ('comfyui', 'lmstudio'). Bloqueante: el panel no responde hasta que el
