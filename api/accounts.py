@@ -137,7 +137,6 @@ def youtube_callback(code: str = None, state: str = None, error: str = None):
     channel_id = None
     try:
         from google.oauth2.credentials import Credentials
-        from google.auth.transport.requests import Request
         from googleapiclient.discovery import build
 
         creds = Credentials(

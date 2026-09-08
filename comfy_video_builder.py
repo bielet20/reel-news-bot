@@ -27,7 +27,6 @@ import math
 import os
 import re
 import subprocess
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -49,13 +48,9 @@ CONTROL_CENTER_URL = os.getenv(
 FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
 
-# ── Text-to-video (Wan2.2-T2V + LoRA Lightning T2V, 4 pasos) ──────────────────
-# Los modelos T2V no venían con la instalación (solo los I2V); se descargan a
-# models/unet y models/loras/Wan2.2-Lightning-T2V (ver scripts/descargar_wan_t2v.sh).
-WAN22_T2V_HIGH_UNET = os.getenv("COMFY_WAN_T2V_HIGH", "Wan2.2-T2V-A14B-HighNoise-Q3_K_S.gguf")
-WAN22_T2V_LOW_UNET = os.getenv("COMFY_WAN_T2V_LOW", "Wan2.2-T2V-A14B-LowNoise-Q3_K_S.gguf")
-WAN22_T2V_LORA_HIGH = os.getenv("COMFY_WAN_T2V_LORA_HIGH", "Wan2.2-Lightning-T2V\\high_noise_model.safetensors")
-WAN22_T2V_LORA_LOW = os.getenv("COMFY_WAN_T2V_LORA_LOW", "Wan2.2-Lightning-T2V\\low_noise_model.safetensors")
+# Nota: el texto→vídeo puro de Wan2.2 (WanImageToVideo sin start_image) salía
+# NEGRO con los GGUF Q3, así que el pipeline es Flux (fotograma) → Wan2.2-I2V. Los
+# modelos T2V y sus constantes se quitaron por no usarse.
 
 # ── Image-to-video (Wan2.2-I2V + LoRA Lightning I2V) — para encadenar segmentos ─
 WAN22_HIGH_NOISE_UNET = os.getenv("COMFY_WAN_HIGH", "Wan2.2-I2V-A14B-HighNoise-Q3_K_S.gguf")
@@ -986,7 +981,7 @@ def generar_fondo_seccion(provider: str, style_prefix: str, scene: dict, dur: fl
                            log_fn=lambda m: None, should_cancel=None) -> Path:
     """Genera el fondo (sin audio) de UNA sección como vídeo de la duración
     `dur`, con el generador `provider`:
-      - "wan22": Wan2.2-T2V (seg 1) + Wan2.2-I2V encadenado (local, la mejor calidad).
+      - "wan22": Flux (fotograma) + Wan2.2-I2V encadenado (local, la mejor calidad).
       - "ltx":   LTX-Video 2B, clips largos de una sola pasada (local, rápido).
       - "fal":   API de fal.ai (de pago, requiere FAL_KEY).
     """

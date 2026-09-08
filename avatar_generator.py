@@ -8,10 +8,7 @@ Servicios soportados:
   - "auto"       → Prueba D-ID primero (si hay API key), luego SadTalker
 """
 import os
-import re
-import sys
 import time
-import uuid
 import shutil
 import subprocess
 import tempfile
@@ -228,7 +225,7 @@ def generar_con_sadtalker(
         else:
             modo = "CPU"
         print(f"   -> Ejecutando SadTalker (modo {modo})...")
-        print(f"      Esto puede tardar 1-5 min según el hardware.")
+        print("      Esto puede tardar 1-5 min según el hardware.")
 
         result = subprocess.run(
             cmd,

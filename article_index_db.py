@@ -10,7 +10,6 @@ import sqlite3
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 DB_PATH = Path(__file__).parent / "_library" / "article_index.db"
 

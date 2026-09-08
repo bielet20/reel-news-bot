@@ -104,7 +104,7 @@ def list_edge_voices():
     from tts import VOCES_EDGE_ES
 
     print(f"\n{'='*55}")
-    print(f"  Voces edge-tts en español (gratis, sin API key)")
+    print("  Voces edge-tts en español (gratis, sin API key)")
     print(f"{'='*55}")
     for v in VOCES_EDGE_ES:
         print(f"  {v['id']:<30} {v['name']}")

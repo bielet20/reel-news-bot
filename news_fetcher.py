@@ -460,7 +460,6 @@ def buscar_variadas(temas=None, por_tema: int = 3, pais: str = "ES") -> list:
 
 
 if __name__ == "__main__":
-    import json
     print("=== Fuentes directas verificadas (ES) ===")
     noticias = buscar_fuentes_directas(pais="ES", max_por_fuente=2)
     for n in noticias[:6]:

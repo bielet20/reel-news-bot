@@ -18,7 +18,6 @@ import io
 import os
 import random
 import tempfile
-import textwrap
 
 import numpy as np
 import requests

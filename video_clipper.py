@@ -34,7 +34,7 @@ from summarizer import (
     PALABRA_RE, PALABRAS_CLAVE_VIDEO, _normalizar, _limpiar_transcripcion,
 )
 from video_builder import (
-    ANCHO, ALTO, FONT_BOLD, FONT_REGULAR, _frame_texto, _partir_si_es_larga,
+    ANCHO, ALTO, FONT_BOLD, _frame_texto, _partir_si_es_larga,
 )
 
 ANCHO_V, ALTO_V = ANCHO, ALTO  # 1080x1920

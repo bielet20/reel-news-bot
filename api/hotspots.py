@@ -5,8 +5,8 @@ Router FastAPI para CRUD de hotspots de video.
 
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 import sys
