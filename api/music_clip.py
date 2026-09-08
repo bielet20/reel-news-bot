@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -266,10 +265,6 @@ def _run(job_id: str, req: MusicClipRequest, audio_path: Path, reanudar: bool = 
             _jobs[job_id]["error"] = str(e)
             _jobs[job_id]["completed_at"] = datetime.now().isoformat()
         print(f"[MusicClip] Error: {traceback.format_exc()}")
-
-
-# Importar re aquí para poder usarlo en _run
-import re
 
 
 @router.get("/api/music-clip/activo")

@@ -6,6 +6,7 @@ Tambien permite extraer titulo + fuente de una URL suelta (para cuando el
 usuario pega un link de un articulo en vez de buscar por tema).
 """
 
+import re
 import time
 import urllib.parse
 

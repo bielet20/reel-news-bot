@@ -65,7 +65,7 @@ except ImportError:
 
 from news_fetcher import buscar_noticias, buscar_variadas, CATEGORIAS
 from article_extractor import extraer_texto, extraer_articulo
-from summarizer import generar_guion_reel, generar_guion_reel_claude
+from summarizer import generar_guion_reel_claude
 from tts import generar_audio, duracion_audio
 from video_builder import construir_video
 from youtube_extractor import extraer_youtube
@@ -74,7 +74,7 @@ from video_clipper import generar_reel_desde_clip, generar_multiples_reels_desde
 from video_extractor import transcribir_video_local
 from music_analyzer import EXTS_VIDEO as _EXTS_VIDEO, EXTS_AUDIO as _EXTS_AUDIO
 from image_pipeline import preparar_imagenes
-from avatar_generator import generar_avatar, estado as avatar_estado
+from avatar_generator import generar_avatar
 from local_reel_builder import construir_reel_video_local
 
 CARPETA_SALIDA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -402,7 +402,7 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                 "Este video es un Premiere de YouTube que todavia no se ha estrenado. "
                 "Espera a que se publique y vuelve a intentarlo."
             ) from e
-        print(f"   -> No hay transcripcion disponible. Intentando como videoclip musical...")
+        print("   -> No hay transcripcion disponible. Intentando como videoclip musical...")
 
     if datos is None:
         try:
@@ -533,7 +533,7 @@ def procesar_video_local(ruta: str, carpeta_salida: str = CARPETA_SALIDA,
         ruta_info = os.path.join(carpeta_salida, f"{slug}{sufijo}_info.txt")
         with open(ruta_info, "w", encoding="utf-8") as f:
             f.write(f"Titulo: {resultado['titulo']}\n")
-            f.write(f"Fuente: local\n")
+            f.write("Fuente: local\n")
             f.write(f"Archivo: {ruta}\n")
             f.write(f"Tramo recortado: {resultado['inicio']:.0f}s - "
                     f"{resultado['fin']:.0f}s ({resultado['duracion']:.0f}s)\n\n")
@@ -567,7 +567,7 @@ def procesar_reel_video_local(
     if not rutas_clips:
         raise ValueError("Debes pasar al menos un clip visual con --clips.")
 
-    print(f"\n=== Procesando reel de video local ===")
+    print("\n=== Procesando reel de video local ===")
     print(f"   Audio: {ruta_audio}")
     print(f"   Clips visuales ({len(rutas_clips)}): {[os.path.basename(r) for r in rutas_clips]}")
 
@@ -1122,7 +1122,6 @@ def main():
             sys.exit(1)
 
         for noticia in pool[: args.cantidad]:
-            tema_tendencia = noticia.get("tema_tendencia", "trending")
             try:
                 ruta = procesar_noticia(noticia, "default", duracion_maxima=args.duracion_maxima)
                 generados.append(ruta)

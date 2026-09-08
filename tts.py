@@ -122,7 +122,7 @@ def _generar_audio_xtts_local(texto: str, ruta_salida: str,
     except ImportError:
         raise RuntimeError("Instala TTS para usar motor local: pip install TTS")
 
-    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Cargar modelo (se cachea tras la primera descarga)
     tts_engine = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
