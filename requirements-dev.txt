@@ -1,0 +1,5 @@
+# Dependencias solo para desarrollo / tests. No hacen falta en producción.
+#   pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8.0
+ruff>=0.6

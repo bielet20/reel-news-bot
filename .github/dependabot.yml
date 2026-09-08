@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # Dependencias de Python (raíz). Agrupadas en un solo PR semanal para no
+  # inundar de ruido; yt-dlp va aparte porque conviene mirarlo cuanto antes.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-deps:
+        patterns: ["*"]
+        exclude-patterns: ["yt-dlp"]
+
+  # Frontend Next.js
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      web-deps:
+        patterns: ["*"]
+
+  # Sidecar de WhatsApp
+  - package-ecosystem: npm
+    directory: "/wa_service"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+
+  # Acciones de GitHub usadas en los workflows
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
