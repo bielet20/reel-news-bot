@@ -10,7 +10,10 @@ del MP4 para que el video resultante sea compartible en redes sociales.
 import json
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 LIBRARY_DIR = Path(__file__).parent / "_library"

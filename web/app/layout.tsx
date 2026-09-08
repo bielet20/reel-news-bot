@@ -9,8 +9,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className="h-full">
-      <body className="min-h-full flex flex-col">
+    // suppressHydrationWarning: extensiones del navegador (traductores, conversores
+    // de moneda, gestores de contraseñas...) inyectan atributos en <html>/<body>
+    // antes de que React hidrate — p.ej. data-smart-converter-loaded. Sin esto,
+    // Next 16 lo marca como error de hidratación en consola. Solo silencia el
+    // aviso para los atributos de ese elemento, no para su contenido.
+    <html lang="es" className="h-full" suppressHydrationWarning>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <nav style={{
           background: "var(--surface)",
           borderBottom: "1px solid var(--border)",

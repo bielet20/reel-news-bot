@@ -2,9 +2,14 @@
 whatsapp_uploader.py
 Cliente HTTP para el sidecar Node.js (wa_service) que gestiona WhatsApp Web.
 """
+import os
+
 import requests
 
-WA_SERVICE_URL = "http://localhost:3001"
+# En local (start.sh) el sidecar escucha en localhost:3001. En Docker el backend
+# NO llega ahí: hay que apuntar al nombre del servicio de compose. Se fija con
+# WA_SERVICE_URL=http://whatsapp:3001 en el environment del backend.
+WA_SERVICE_URL = os.getenv("WA_SERVICE_URL", "http://localhost:3001").rstrip("/")
 
 
 def subir_status(video_path: str, caption: str = "") -> dict:

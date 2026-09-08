@@ -14,7 +14,6 @@ Playlists gestionadas automáticamente:
 """
 
 import os
-from pathlib import Path
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",

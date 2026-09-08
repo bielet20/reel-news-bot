@@ -1,0 +1,23 @@
+# Ruff — linter para el código Python del proyecto.
+#   ruff check .            (lo que corre CI)
+#   ruff check --fix .      (arregla lo autoformateable)
+#
+# El set es deliberadamente corto: pyflakes (F) pilla la clase de bug que de
+# verdad rompe en runtime (nombres sin definir, imports que faltan) sin obligar
+# a reformatear todo el repo. Se puede ampliar poco a poco.
+
+target-version = "py311"
+line-length = 100
+
+extend-exclude = ["venv", "vendor", "web", "assets", "certs"]
+
+[lint]
+select = [
+    "F",      # pyflakes: undefined names, imports sin usar, f-strings vacías
+    "E9",     # errores de sintaxis / IndentationError
+    "B006",   # argumento por defecto mutable
+    "B018",   # expresión sin efecto (línea muerta)
+]
+# Los tests usan fixtures e imports "sin usar" a propósito.
+[lint.per-file-ignores]
+"tests/*" = ["F811", "F401"]

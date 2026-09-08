@@ -14,23 +14,48 @@ const ESTILOS = [
 
 interface JobState {
   id: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "cancelled";
   progress: { actual: number; total: number; label: string };
   output_files: string[];
   error: string | null;
+  sync_letra?: string;
+  voces?: { tipo?: string; f0_mediana?: number; fuente?: string } | null;
 }
+
+const DRAFT_KEY = "montaje_draft_v1";
 
 export default function MontajePage() {
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioPath, setAudioPath] = useState<string>("");
+  const [audioName, setAudioName] = useState<string>("");
   const [uploading, setUploading] = useState(false);
+  const [draftRestaurado, setDraftRestaurado] = useState(false);
   const [letra, setLetra] = useState("");
+  const [letraLrc, setLetraLrc] = useState("");
+  const [idioma, setIdioma] = useState("auto");
   const [artista, setArtista] = useState("");
   const [titulo, setTitulo] = useState("");
   const [estilo, setEstilo] = useState("cinematico");
   const [mostrarLetra, setMostrarLetra] = useState(true);
   const [mostrarCabecera, setMostrarCabecera] = useState(true);
+  const [aspect, setAspect] = useState<"16:9" | "9:16">("16:9");
+  const [proveedores, setProveedores] = useState<{ id: string; label: string; disponible: boolean; nota: string }[]>([]);
+  const [estado, setEstado] = useState<{
+    comfy: boolean; lm_studio: boolean; problemas: string[];
+    control_center?: boolean;
+    arranque?: { activo: boolean; mensaje: string };
+  } | null>(null);
+  const [arrancando, setArrancando] = useState(false);
+  const [provider, setProvider] = useState<string>("wan22");
+  const [voz, setVoz] = useState<"auto" | "hombre" | "mujer" | "mixta">("auto");
+  const modoVideo = provider !== "imagen";
+  const [vozFile, setVozFile] = useState<File | null>(null);
+  const [vozPath, setVozPath] = useState<string>("");
+  const [uploadingVoz, setUploadingVoz] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
+  const [reanudables, setReanudables] = useState<
+    { slug: string; titulo: string; hechas: number; total: number; en_curso: boolean }[]
+  >([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [publishing, setPublishing] = useState<string | null>(null);
@@ -38,6 +63,94 @@ export default function MontajePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const draftCargado = useRef(false);
+
+  // ── Borrador: recupera el formulario si la página se recargó o se colgó ──────
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d.letra) setLetra(d.letra);
+        if (d.letraLrc) setLetraLrc(d.letraLrc);
+        if (d.idioma) setIdioma(d.idioma);
+        if (d.artista) setArtista(d.artista);
+        if (d.titulo) setTitulo(d.titulo);
+        if (d.estilo) setEstilo(d.estilo);
+        if (d.aspect) setAspect(d.aspect);
+        if (d.provider) setProvider(d.provider);
+        if (d.voz) setVoz(d.voz);
+        if (typeof d.mostrarLetra === "boolean") setMostrarLetra(d.mostrarLetra);
+        if (typeof d.mostrarCabecera === "boolean") setMostrarCabecera(d.mostrarCabecera);
+        if (d.audioPath) { setAudioPath(d.audioPath); setAudioName(d.audioName || "audio restaurado"); }
+        if (d.vozPath) setVozPath(d.vozPath);
+        if (d.letra || d.audioPath || d.titulo) setDraftRestaurado(true);
+      }
+    } catch { /* localStorage no disponible */ }
+    draftCargado.current = true;
+  }, []);
+
+  // Guarda el borrador en cada cambio (después de la primera carga).
+  useEffect(() => {
+    if (!draftCargado.current) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        letra, letraLrc, idioma, artista, titulo, estilo, aspect, provider, voz,
+        mostrarLetra, mostrarCabecera, audioPath, audioName, vozPath,
+      }));
+    } catch { /* cuota / modo privado */ }
+  }, [letra, letraLrc, idioma, artista, titulo, estilo, aspect, provider, voz,
+      mostrarLetra, mostrarCabecera, audioPath, audioName, vozPath]);
+
+  const descartarBorrador = () => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* */ }
+    setLetra(""); setLetraLrc(""); setArtista(""); setTitulo("");
+    setAudioFile(null); setAudioPath(""); setAudioName("");
+    setVozFile(null); setVozPath("");
+    setDraftRestaurado(false);
+  };
+
+  // Estado de las herramientas (ComfyUI, LM Studio, modelos) + generadores
+  const cargarEstado = () => {
+    fetch("/api/music-clip/estado")
+      .then((r) => r.json())
+      .then((e) => {
+        setEstado(e);
+        setProveedores(e.providers || []);
+        setArrancando(Boolean(e.arranque?.activo));
+      })
+      .catch(() => {});
+  };
+  useEffect(() => {
+    cargarEstado();
+    const id = setInterval(cargarEstado, arrancando ? 3000 : 15000);
+    return () => clearInterval(id);
+  }, [arrancando]);
+
+  const arrancarHerramientas = async () => {
+    setArrancando(true);
+    try {
+      const r = await fetch("/api/music-clip/arrancar-herramientas", { method: "POST" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setError(d.detail || "No se pudo arrancar (Centro de Control :8090).");
+        setArrancando(false);
+      }
+    } catch {
+      setError("No se pudo contactar con el backend.");
+      setArrancando(false);
+    }
+    cargarEstado();
+  };
+
+  // Montajes a medias que se pueden reanudar (backend/ComfyUI se cortó, o cancelado)
+  const cargarReanudables = () => {
+    fetch("/api/music-clip/reanudables")
+      .then((r) => r.json())
+      .then((d) => setReanudables(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  };
+  useEffect(() => { cargarReanudables(); }, []);
 
   // Poll job status
   useEffect(() => {
@@ -51,17 +164,38 @@ export default function MontajePage() {
         if (res.ok) {
           const data: JobState = await res.json();
           setJob(data);
-          if (data.status !== "running") clearInterval(pollRef.current!);
+          if (data.status !== "running") {
+            clearInterval(pollRef.current!);
+            cargarReanudables();
+            if (data.status === "completed") {
+              try { localStorage.removeItem(DRAFT_KEY); } catch { /* */ }
+              setDraftRestaurado(false);
+            }
+          }
         }
       } catch { /* retry */ }
     }, 2500);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [job?.id, job?.status]);
 
+  async function reanudarMontaje(slug: string) {
+    setError("");
+    try {
+      const res = await fetch(`/api/music-clip/reanudar/${encodeURIComponent(slug)}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "No se pudo reanudar.");
+      setJob({ id: data.job_id, status: "running", progress: { actual: 0, total: 0, label: "Reanudando…" }, output_files: [], error: null });
+    } catch (e) {
+      setError(`${e}`);
+    }
+  }
+
   async function handleAudioSelect(file: File) {
     setAudioFile(file);
+    setAudioName(file.name);
     setAudioPath("");
     setError("");
+    setDraftRestaurado(false);
     setUploading(true);
 
     try {
@@ -78,6 +212,7 @@ export default function MontajePage() {
     } catch (e) {
       setError(`Error subiendo audio: ${e}`);
       setAudioFile(null);
+      setAudioName("");
     } finally {
       setUploading(false);
     }
@@ -88,6 +223,29 @@ export default function MontajePage() {
     setDragging(false);
     const file = e.dataTransfer.files[0];
     if (file) handleAudioSelect(file);
+  }
+
+  async function handleVozSelect(file: File) {
+    setVozFile(file);
+    setVozPath("");
+    setError("");
+    setUploadingVoz(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const backendUrl = typeof window !== "undefined"
+        ? `${window.location.protocol}//${window.location.hostname}:8000`
+        : "http://localhost:8000";
+      const res = await fetch(`${backendUrl}/api/music-clip/upload-audio`, { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setVozPath(data.path);
+    } catch (e) {
+      setError(`Error subiendo la pista de voz: ${e}`);
+      setVozFile(null);
+    } finally {
+      setUploadingVoz(false);
+    }
   }
 
   async function handleGenerate() {
@@ -105,11 +263,18 @@ export default function MontajePage() {
         body: JSON.stringify({
           audio_path: audioPath,
           letra,
+          letra_lrc: letraLrc.trim() || null,
           artista,
           titulo,
           estilo,
           mostrar_letra: mostrarLetra,
           mostrar_cabecera: mostrarCabecera,
+          modo_fondo: modoVideo ? "video" : "imagen",
+          provider,
+          aspect,
+          idioma,
+          voz: modoVideo ? voz : "auto",
+          pista_voz_path: modoVideo && voz !== "hombre" && vozPath ? vozPath : null,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -125,6 +290,12 @@ export default function MontajePage() {
   const isRunning = job?.status === "running";
   const hasSections = letra.trim().split(/\n\s*\n/).filter(Boolean).length > 0;
 
+  async function cancelJob() {
+    if (!job) return;
+    setJob({ ...job, progress: { ...job.progress, label: "Parando…" } });
+    await fetch(`/api/music-clip/jobs/${job.id}/cancel`, { method: "POST" }).catch(() => {});
+  }
+
   return (
     <main className="min-h-screen px-4 py-10">
       <div className="max-w-2xl mx-auto">
@@ -136,11 +307,30 @@ export default function MontajePage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Montaje de videoclip</h1>
           <p style={{ color: "var(--muted)", fontSize: 14 }}>
-            Sube tu canción y la letra — generamos clips con imágenes AI sincronizados por secciones.
+            Sube tu canción y la letra — generamos un vídeo por sección (fondos IA
+            relacionados con la letra) y un videoclip completo.
           </p>
         </div>
 
         <div className="space-y-5">
+
+          {draftRestaurado && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10, fontSize: 12,
+              background: "#12233a", border: "1px solid #2c4a6e", borderRadius: 10, padding: "8px 12px",
+            }}>
+              <span style={{ flex: 1 }}>
+                📝 Recuperé lo que tenías escrito (letra, título, audio…) de la última vez.
+              </span>
+              <button
+                onClick={descartarBorrador}
+                style={{ fontSize: 12, padding: "4px 10px", borderRadius: 8, cursor: "pointer",
+                  background: "none", border: "1px solid #2c4a6e", color: "var(--muted)" }}
+              >
+                Empezar de cero
+              </button>
+            </div>
+          )}
 
           {/* ── Audio upload ─── */}
           <Section title="Tu canción">
@@ -148,11 +338,11 @@ export default function MontajePage() {
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
-              onClick={() => !audioFile && fileInputRef.current?.click()}
+              onClick={() => !(audioFile || audioPath) && fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${dragging ? "var(--accent)" : audioFile ? "var(--success)" : "var(--border)"}`,
+                border: `2px dashed ${dragging ? "var(--accent)" : (audioFile || audioPath) ? "var(--success)" : "var(--border)"}`,
                 borderRadius: 12, padding: "24px 20px", textAlign: "center",
-                cursor: audioFile ? "default" : "pointer",
+                cursor: (audioFile || audioPath) ? "default" : "pointer",
                 background: dragging ? "rgba(99,102,241,0.07)" : "var(--surface2)",
                 transition: "all 0.2s",
               }}
@@ -166,13 +356,14 @@ export default function MontajePage() {
               />
               {uploading ? (
                 <p style={{ color: "var(--muted)", fontSize: 14 }}>⟳ Subiendo audio…</p>
-              ) : audioFile ? (
+              ) : (audioFile || audioPath) ? (
                 <div>
                   <p style={{ fontSize: 15, fontWeight: 700, color: "var(--success)", marginBottom: 4 }}>
-                    ✓ {audioFile.name}
+                    ✓ {audioFile?.name || audioName || "audio cargado"}
                   </p>
                   <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                    {(audioFile.size / 1024 / 1024).toFixed(1)} MB
+                    {audioFile ? `${(audioFile.size / 1024 / 1024).toFixed(1)} MB`
+                      : "recuperado del borrador — sigue en el servidor"}
                   </p>
                   {audioPath && (
                     <audio
@@ -183,7 +374,7 @@ export default function MontajePage() {
                     />
                   )}
                   <button
-                    onClick={(e) => { e.stopPropagation(); setAudioFile(null); setAudioPath(""); }}
+                    onClick={(e) => { e.stopPropagation(); setAudioFile(null); setAudioPath(""); setAudioName(""); }}
                     style={{ display: "block", margin: "10px auto 0", fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}
                   >
                     ✕ Cambiar archivo
@@ -195,7 +386,7 @@ export default function MontajePage() {
                   <p style={{ fontSize: 14, color: "var(--text)", marginBottom: 4 }}>
                     Arrastra aquí tu canción o <span style={{ color: "var(--accent)" }}>haz clic para seleccionar</span>
                   </p>
-                  <p style={{ fontSize: 12, color: "var(--muted)" }}>MP3, WAV, FLAC, AAC, M4A · máx 50 MB</p>
+                  <p style={{ fontSize: 12, color: "var(--muted)" }}>MP3, WAV, FLAC, AAC, M4A, AIFF · máx 300 MB</p>
                 </>
               )}
             </div>
@@ -228,7 +419,7 @@ export default function MontajePage() {
           {/* ── Letra ─── */}
           <Section
             title="Letra"
-            hint='Separa secciones con línea en blanco, o usa etiquetas como [Verso 1], [Estribillo]'
+            hint='Separa secciones con línea en blanco, o usa etiquetas como [Verso 1], [Estribillo]. La letra se sincroniza sola con el audio (Whisper).'
           >
             <textarea
               value={letra}
@@ -260,6 +451,41 @@ export default function MontajePage() {
                 })}
               </div>
             )}
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ fontSize: 12, color: "var(--muted)", cursor: "pointer", userSelect: "none" }}>
+                ¿Tienes la letra con tiempos (.lrc)? Pégala para sincronía exacta
+              </summary>
+              <textarea
+                value={letraLrc}
+                onChange={(e) => setLetraLrc(e.target.value)}
+                placeholder={`[00:12.30]Primera línea cantada\n[00:15.80]Segunda línea\n[00:19.10]...`}
+                rows={6}
+                style={{ ...inputStyle, marginTop: 8, resize: "vertical", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+              />
+              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                Si lo dejas vacío, la letra de arriba se alinea automáticamente con
+                el audio. Con voz a cappella (abajo) la sincronía es mejor.
+              </p>
+            </details>
+
+            <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              <label style={{ fontSize: 12, color: "var(--muted)" }}>Idioma de la letra</label>
+              <select
+                value={idioma}
+                onChange={(e) => setIdioma(e.target.value)}
+                style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12 }}
+              >
+                <option value="auto">Detectar automáticamente</option>
+                <option value="es">Español</option>
+                <option value="en">Inglés</option>
+                <option value="pt">Portugués</option>
+                <option value="fr">Francés</option>
+                <option value="it">Italiano</option>
+              </select>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                (para transcribir bien y sincronizar la letra)
+              </span>
+            </div>
           </Section>
 
           {/* ── Estilo visual ─── */}
@@ -283,6 +509,163 @@ export default function MontajePage() {
                   <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{e.desc}</div>
                 </button>
               ))}
+            </div>
+          </Section>
+
+          {/* ── Formato ─── */}
+          <Section title="Formato">
+            <div style={{ display: "flex", gap: 8 }}>
+              {([
+                { id: "16:9", label: "16:9 horizontal", icon: "🖥️", desc: "1920×1080" },
+                { id: "9:16", label: "9:16 vertical", icon: "📱", desc: "1080×1920 (reel)" },
+              ] as const).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setAspect(f.id)}
+                  style={{
+                    flex: 1, padding: "10px 8px", borderRadius: 10, textAlign: "center", cursor: "pointer",
+                    border: `1px solid ${aspect === f.id ? "var(--accent)" : "var(--border)"}`,
+                    background: aspect === f.id ? "rgba(99,102,241,0.12)" : "var(--surface2)",
+                  }}
+                >
+                  <div style={{ fontSize: 20, marginBottom: 2 }}>{f.icon}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: aspect === f.id ? "var(--accent)" : "var(--text)" }}>{f.label}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{f.desc}</div>
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          {/* ── Fondos ─── */}
+          <Section title="Fondos" hint="Un LLM saca un guion visual de la letra; el generador crea un vídeo por sección relacionado con lo que se canta.">
+            {/* Estado de herramientas */}
+            {estado && (
+              <div style={{
+                display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10, fontSize: 11,
+              }}>
+                <span style={{ padding: "3px 9px", borderRadius: 20, background: estado.comfy ? "#0a2a1a" : "#2a0a0a", color: estado.comfy ? "var(--success)" : "var(--error)", border: `1px solid ${estado.comfy ? "#1a5a3a" : "#5a2020"}` }}>
+                  {estado.comfy ? "● ComfyUI activo" : "○ ComfyUI apagado"}
+                </span>
+                <span style={{ padding: "3px 9px", borderRadius: 20, background: estado.lm_studio ? "#0a2a1a" : "#2a1a0a", color: estado.lm_studio ? "var(--success)" : "#d0a020", border: `1px solid ${estado.lm_studio ? "#1a5a3a" : "#5a4020"}` }}>
+                  {estado.lm_studio ? "● LM Studio activo" : "○ LM Studio (opcional)"}
+                </span>
+                {estado.control_center && (!estado.comfy || !estado.lm_studio) && (
+                  <button
+                    onClick={arrancarHerramientas}
+                    disabled={arrancando}
+                    style={{
+                      fontSize: 11, padding: "3px 11px", borderRadius: 20, cursor: arrancando ? "wait" : "pointer",
+                      background: "#12233a", color: "var(--accent, #4c9ffe)", border: "1px solid #2c4a6e",
+                    }}
+                  >
+                    {arrancando ? "⏳ arrancando…" : "▶ Arrancar ComfyUI/LM Studio"}
+                  </button>
+                )}
+                {estado.control_center === false && (
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                    Centro de Control (:8090) apagado — no puedo arrancar desde aquí
+                  </span>
+                )}
+                <button onClick={cargarEstado} style={{ fontSize: 11, background: "none", border: "none", color: "var(--muted)", cursor: "pointer", textDecoration: "underline" }}>
+                  refrescar
+                </button>
+              </div>
+            )}
+            {arrancando && estado?.arranque?.mensaje && (
+              <div style={{ fontSize: 11, color: "var(--accent, #4c9ffe)", marginBottom: 10 }}>
+                {estado.arranque.mensaje}
+              </div>
+            )}
+            {estado && estado.problemas.length > 0 && (
+              <div style={{ fontSize: 11, color: "#d0a020", background: "#2a1a0a", border: "1px solid #5a4020", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+                {estado.problemas.map((p, i) => <div key={i}>⚠️ {p}</div>)}
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(proveedores.length ? proveedores : [
+                { id: "wan22", label: "Wan 2.2 T2V (local)", disponible: false, nota: "Cargando…" },
+                { id: "imagen", label: "Imagen fija (Pollinations)", disponible: true, nota: "" },
+              ]).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setProvider(p.id)}
+                  style={{
+                    textAlign: "left", padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                    border: `1px solid ${provider === p.id ? "var(--accent)" : "var(--border)"}`,
+                    background: provider === p.id ? "rgba(99,102,241,0.12)" : "var(--surface2)",
+                    opacity: p.disponible ? 1 : 0.65,
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600, color: provider === p.id ? "var(--accent)" : "var(--text)" }}>
+                    {provider === p.id ? "● " : "○ "}{p.label}
+                    {!p.disponible && <span style={{ color: "var(--error)", fontWeight: 400 }}> · no listo</span>}
+                  </div>
+                  {p.nota && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{p.nota}</div>}
+                </button>
+              ))}
+              {provider !== "imagen" && !proveedores.find((p) => p.id === provider)?.disponible && (
+                <p style={{ fontSize: 11, color: "var(--error)", margin: "2px 0 0" }}>
+                  Este generador no está listo — si generas ahora, el job fallará con el motivo. Arréglalo o elige «Imagen fija».
+                </p>
+              )}
+              {modoVideo && (
+                <div style={{ marginTop: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", display: "block", marginBottom: 6 }}>
+                    Voz de la canción
+                  </label>
+                  <select
+                    value={voz}
+                    onChange={(e) => setVoz(e.target.value as typeof voz)}
+                    style={{
+                      width: "100%", padding: "8px 10px", borderRadius: 8,
+                      border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text)",
+                    }}
+                  >
+                    <option value="auto">Detectar automáticamente</option>
+                    <option value="mujer">Mujer</option>
+                    <option value="hombre">Hombre</option>
+                    <option value="mixta">Mixta (dúo hombre + mujer)</option>
+                  </select>
+                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0" }}>
+                    Pone a quien canta en pantalla y le sincroniza los labios con la letra (LatentSync).
+                    En “auto” el sistema analiza el tono de voz.
+                  </p>
+                </div>
+              )}
+              {modoVideo && voz !== "hombre" && (
+                <div style={{
+                  border: `2px dashed ${vozFile ? "var(--success)" : "var(--border)"}`,
+                  borderRadius: 10, padding: "14px", textAlign: "center", background: "var(--surface2)",
+                }}>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    id="voz-acapella"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVozSelect(f); }}
+                  />
+                  {uploadingVoz ? (
+                    <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>⟳ Subiendo…</p>
+                  ) : vozFile ? (
+                    <p style={{ fontSize: 12, color: "var(--success)", margin: 0 }}>
+                      ✓ {vozFile.name}
+                      <button
+                        onClick={() => { setVozFile(null); setVozPath(""); }}
+                        style={{ marginLeft: 8, fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}
+                      >
+                        ✕ quitar
+                      </button>
+                    </p>
+                  ) : (
+                    <label htmlFor="voz-acapella" style={{ fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+                      Pista de voz a cappella <span style={{ color: "var(--muted)" }}>(opcional, mejora el lip-sync)</span> —{" "}
+                      <span style={{ color: "var(--accent)" }}>seleccionar</span>
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
           </Section>
 
@@ -311,6 +694,30 @@ export default function MontajePage() {
             </p>
           )}
 
+          {/* ── Montajes a medias: reanudar ─── */}
+          {reanudables.filter((r) => !r.en_curso).length > 0 && !isRunning && (
+            <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              {reanudables.filter((r) => !r.en_curso).map((r) => (
+                <div key={r.slug} style={{
+                  display: "flex", alignItems: "center", gap: 10, fontSize: 12,
+                  background: "#12233a", border: "1px solid #2c4a6e", borderRadius: 10, padding: "8px 12px",
+                }}>
+                  <span style={{ flex: 1 }}>
+                    Montaje a medias: <strong>{r.titulo}</strong>
+                    {r.total ? ` — ${r.hechas}/${r.total} secciones` : ""}
+                  </span>
+                  <button
+                    onClick={() => reanudarMontaje(r.slug)}
+                    style={{ fontSize: 12, padding: "5px 12px", borderRadius: 8, cursor: "pointer",
+                      background: "var(--accent)", border: "none", color: "#fff", fontWeight: 600 }}
+                  >
+                    ▶ Reanudar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* ── Botón generar ─── */}
           <button
             onClick={handleGenerate}
@@ -332,7 +739,7 @@ export default function MontajePage() {
         {/* ── Job progress ─── */}
         {job && (
           <div style={{ marginTop: 20 }}>
-            <JobPanel job={job} onPublish={setPublishing} />
+            <JobPanel job={job} onPublish={setPublishing} onCancel={cancelJob} />
           </div>
         )}
 
@@ -370,17 +777,23 @@ que el mundo empieza en ti`}
 
 // ── Job progress panel ────────────────────────────────────────────────────────
 
-function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) => void }) {
+function JobPanel({ job, onPublish, onCancel }: { job: JobState; onPublish: (f: string) => void; onCancel: () => void }) {
   const total = job.progress.total || job.output_files.length;
   const actual = job.progress.actual || job.output_files.length;
   const pct = total > 0 ? Math.round((actual / total) * 100) : 0;
+  const headBg = job.status === "completed" ? "#0a2a1a"
+    : job.status === "failed" ? "#2a0a0a"
+    : job.status === "cancelled" ? "#2a1f0a" : "#0a1a2a";
+  const headColor = job.status === "completed" ? "var(--success)"
+    : job.status === "failed" ? "var(--error)"
+    : job.status === "cancelled" ? "#d0a020" : "#60a5fa";
 
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" }}>
       {/* Header estado */}
       <div style={{
         padding: "14px 18px",
-        background: job.status === "completed" ? "#0a2a1a" : job.status === "failed" ? "#2a0a0a" : "#0a1a2a",
+        background: headBg,
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", gap: 10,
       }}>
@@ -388,12 +801,14 @@ function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) =>
         <div style={{ flex: 1 }}>
           <p style={{
             fontSize: 13, fontWeight: 700, margin: 0,
-            color: job.status === "completed" ? "var(--success)" : job.status === "failed" ? "var(--error)" : "#60a5fa",
+            color: headColor,
           }}>
             {job.status === "running"
               ? job.progress.label || "Generando…"
               : job.status === "completed"
               ? `✓ ${job.output_files.length} clip${job.output_files.length !== 1 ? "s" : ""} generado${job.output_files.length !== 1 ? "s" : ""}`
+              : job.status === "cancelled"
+              ? `⏹ Cancelado — ${job.output_files.length} clip(s) hechos. Usa "▶ Reanudar" arriba para seguir sin repetirlos.`
               : `✕ Error: ${job.error}`}
           </p>
           {job.status === "running" && total > 0 && (
@@ -401,7 +816,34 @@ function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) =>
               Clip {actual} de {total}
             </p>
           )}
+          {job.status === "completed" && (
+            <p style={{
+              fontSize: 11, margin: "3px 0 0",
+              color: job.sync_letra === "uniforme" ? "#d0a020" : "var(--muted)",
+            }}>
+              {job.sync_letra === "lrc"
+                ? "✓ Letra sincronizada por LRC (exacta)"
+                : job.sync_letra === "whisper"
+                ? "✓ Letra sincronizada con el audio (Whisper)"
+                : "⚠️ No se pudo sincronizar la letra con el audio — está repartida a ojo. Para sincronía real: pega un .lrc o sube la voz a cappella, y comprueba el idioma."}
+              {job.voces?.tipo && job.voces.tipo !== "manual"
+                ? ` · voz: ${job.voces.tipo}${job.voces.f0_mediana ? ` (${job.voces.f0_mediana} Hz)` : ""}`
+                : ""}
+            </p>
+          )}
         </div>
+        {job.status === "running" && (
+          <button
+            onClick={onCancel}
+            style={{
+              fontSize: 12, padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+              background: "#2a0a0a", color: "var(--error)", border: "1px solid #5a2020",
+              fontWeight: 600, flexShrink: 0,
+            }}
+          >
+            Cancelar
+          </button>
+        )}
       </div>
 
       {/* Barra de progreso */}
@@ -426,7 +868,9 @@ function JobPanel({ job, onPublish }: { job: JobState; onPublish: (f: string) =>
                 {/* Label */}
                 <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
-                    Clip {i + 1} — {filename.replace(/_reel\.mp4$/, "").replace(/_/g, " ")}
+                    {/_full_reel\.mp4$/.test(filename)
+                      ? "🎬 Videoclip completo"
+                      : `Clip ${i + 1} — ${filename.replace(/_reel\.mp4$/, "").replace(/_/g, " ")}`}
                   </p>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button

@@ -14,13 +14,28 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# En Windows, cuando este proceso no está atado a una consola real (p.ej.
+# lanzado con nohup/redirigido a un log, o como servicio), Python usa por
+# defecto la codificación del sistema (cp1252 en Windows en español) para
+# stdout/stderr en vez de UTF-8. Cualquier print() con emojis, flechas (→)
+# u otros caracteres fuera de ese rango revienta con UnicodeEncodeError y
+# mata el hilo/job que lo imprime, aunque el resto del trabajo ya esté
+# hecho. Forzamos UTF-8 aquí para todo el proceso (incluye los hilos de
+# api/music_clip.py, que corren dentro de este mismo proceso).
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent.parent / ".env")
 except ImportError:
     pass
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -196,9 +211,20 @@ def _run_job(job_id: str, req: GenerateRequest):
             jobs[job_id]["log_file"] = str(log_path)
             jobs[job_id]["started_at"] = datetime.now().isoformat()
 
+        # Fuerza UTF-8 en el subproceso: en Windows, cuando stdout se
+        # redirige a un archivo (no a una consola), Python usa por defecto
+        # la codificación del sistema (p.ej. cp1252 en Windows en español),
+        # que no soporta emojis ni ciertos caracteres que puede generar la
+        # IA en el guion. Sin esto, un print() con esos caracteres revienta
+        # con UnicodeEncodeError y el job falla aunque todo lo demás vaya bien.
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
         with open(log_path, "w", encoding="utf-8") as lf:
             proc = subprocess.Popen(
-                cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=str(CORE_DIR)
+                cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=str(CORE_DIR),
+                env=env,
             )
 
         returncode = proc.wait()
@@ -377,12 +403,66 @@ def list_output():
     return files
 
 
+@app.get("/api/output/stats")
+def output_stats():
+    """Espacio total ocupado por output/ (video + todos sus sidecars)."""
+    archivos = [f for f in OUTPUT_DIR.iterdir() if f.is_file()]
+    return {
+        "count": sum(1 for f in archivos if f.name.endswith("_reel.mp4")),
+        "total_bytes": sum(f.stat().st_size for f in archivos),
+    }
+
+
+# Sidecars que puede generar un reel, segun el pipeline que lo creo
+# (narrado: audio/caption/fuente/guion — clip/musica: info). Todos comparten
+# el mismo slug base que el .mp4 (ver main.py: _guardar_atribucion, _info.txt).
+_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt")
+_VIDEO_NAME_RE = re.compile(r"^(.+?)(_short\d+)?_(?:music_)?reel\.mp4$")
+
+
+def _reel_base_y_sufijo(filename: str):
+    """De 'foo_short2_reel.mp4' -> ('foo', '_short2'); de 'foo_reel.mp4' -> ('foo', '')."""
+    m = _VIDEO_NAME_RE.match(filename)
+    if not m:
+        return None
+    return m.group(1), (m.group(2) or "")
+
+
 @app.get("/api/videos/{filename}")
 def get_video(filename: str):
     file_path = OUTPUT_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
     return FileResponse(str(file_path), media_type="video/mp4")
+
+
+@app.delete("/api/output/{filename}")
+def delete_output(filename: str):
+    """Borra un reel generado y sus archivos asociados (guion, audio,
+    caption, fuente, info) que compartan el mismo slug — no toca los de
+    otros videos ni otros shorts del mismo video."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nombre de archivo invalido")
+
+    file_path = OUTPUT_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    base_info = _reel_base_y_sufijo(filename)
+    borrados = []
+    if base_info:
+        base, sufijo = base_info
+        candidatos = [filename] + [f"{base}{sufijo}{suf}" for suf in _SIDECAR_SUFFIXES]
+    else:
+        candidatos = [filename]
+
+    for nombre in candidatos:
+        ruta = OUTPUT_DIR / nombre
+        if ruta.exists() and ruta.is_file():
+            ruta.unlink()
+            borrados.append(nombre)
+
+    return {"ok": True, "borrados": borrados}
 
 
 @app.post("/api/upload")

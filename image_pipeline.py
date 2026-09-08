@@ -54,7 +54,6 @@ def _redimensionar_para_video(ruta: str) -> str:
     y0 = (img.height - ALTO) // 2
     img = img.crop((x0, y0, x0 + ANCHO, y0 + ALTO))
 
-    from PIL import ImageDraw
     overlay = Image.new("RGB", img.size, (0, 0, 0))
     img = Image.blend(img, overlay, 0.45)
 

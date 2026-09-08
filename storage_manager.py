@@ -3,7 +3,6 @@ storage_manager.py
 Copia videos generados a los destinos configurados: local, Google Drive (rclone), red SMB.
 Config almacenada en _config/storage.json
 """
-import os
 import json
 import shutil
 import subprocess

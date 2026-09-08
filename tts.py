@@ -16,6 +16,7 @@ La configuración de voz se carga de voice_settings.json si existe.
 import asyncio
 import json
 import os
+import tempfile
 from pathlib import Path
 
 from moviepy.editor import AudioFileClip
@@ -121,7 +122,7 @@ def _generar_audio_xtts_local(texto: str, ruta_salida: str,
     except ImportError:
         raise RuntimeError("Instala TTS para usar motor local: pip install TTS")
 
-    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Cargar modelo (se cachea tras la primera descarga)
     tts_engine = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
@@ -271,6 +272,7 @@ def duracion_audio(ruta_audio: str) -> float:
 
 
 if __name__ == "__main__":
-    ruta = generar_audio("Esta es una prueba del sistema de texto a voz.", "/tmp/prueba_tts.mp3")
+    ruta = generar_audio("Esta es una prueba del sistema de texto a voz.",
+                         os.path.join(tempfile.gettempdir(), "prueba_tts.mp3"))
     print("Generado en:", ruta)
     print("Duracion:", duracion_audio(ruta), "segundos")
