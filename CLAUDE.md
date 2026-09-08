@@ -111,6 +111,25 @@ _uploads/                # audios subidos al Montaje (persisten)
 - ComfyUI retiene VRAM: no generar canciones con ACE-Step del AI Studio mientras
   ComfyUI esté abierto.
 
+## Desarrollo / mantenimiento
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q            # tests/ — lógica pura (LRC, aligner mockeado, _json_lenient, …)
+ruff check .         # ruff.toml: solo pyflakes (F) + E9 + B006/B018
+python scripts/doctor.py            # diagnóstico del entorno (ffmpeg, deps, servicios)
+docker compose exec backend python scripts/doctor.py   # …con los chequeos del host
+bash scripts/limpiar.sh [--si] [--todo-uploads]         # borra artefactos de prueba
+```
+
+- CI: `.github/workflows/ci.yml` (py_compile + ruff + pytest 3.11/3.12).
+  `dependabot.yml` agrupa updates de pip/npm/actions.
+- `lyric_video_builder.generar_clips`: si ComfyUI cae a mitad y hay Centro de
+  Control, se reintenta la sección UNA vez tras `arrancar_via_control_center`
+  (1 reinicio/job). Antes tiraba todas las secciones restantes a imagen fija.
+- `whatsapp_uploader.WA_SERVICE_URL` es env; en Docker el backend usa
+  `http://whatsapp:3001` (lo fija docker-compose).
+
 ## Variables de entorno (ver `.env.example`)
 
 ```

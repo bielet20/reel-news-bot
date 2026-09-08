@@ -1,8 +1,11 @@
 #!/bin/bash
-# Descarga los modelos necesarios para el modo "Fondos con vídeo IA" del Montaje
-# (texto->vídeo puro): Wan2.2-T2V-A14B (High/Low, GGUF Q3_K_S) + la LoRA de
-# distilación Lightning T2V (4 pasos). El ComfyUI de E:\AI-Studio ya trae los
-# equivalentes I2V; solo faltan los T2V.
+# OBSOLETO — el Montaje ya NO usa texto->vídeo puro (Wan2.2-T2V salía negro con
+# los GGUF Q3). El pipeline actual es Flux (fotograma) -> Wan2.2-I2V, que ya
+# viene con el ComfyUI de E:\AI-Studio. Este script se conserva solo por si se
+# quiere volver a experimentar con T2V.
+#
+# Descarga Wan2.2-T2V-A14B (High/Low, GGUF Q3_K_S) + la LoRA de distilación
+# Lightning T2V (4 pasos).
 #
 # Uso:  bash scripts/descargar_wan_t2v.sh  [ruta_de_ComfyUI]
 # Por defecto asume  E:\AI-Studio\tools\ComfyUI  (montado como /e/... en Git Bash).
