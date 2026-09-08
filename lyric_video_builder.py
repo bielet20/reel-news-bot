@@ -668,6 +668,14 @@ def generar_clips(
     fondos_video: list = []  # clips VideoFileClip abiertos, se cierran al final
     cancelado = False
 
+    # Auto-recuperación de ComfyUI: si crashea a mitad del job (típico OOM), en
+    # vez de tirar TODAS las secciones restantes a imagen fija, se le pide al
+    # Centro de Control que lo reinicie y se reintenta la sección UNA vez. Solo
+    # un reinicio por job para no entrar en bucle.
+    cc_puede_reiniciar = bool(usar_video and provider in ("wan22", "ltx")
+                              and comfy_video_builder.control_center_disponible())
+    reinicio_comfy_hecho = False
+
     for i, (sec, (t_ini, t_fin)) in enumerate(zip(secciones, tiempos)):
         if t_fin <= t_ini:
             continue
@@ -722,42 +730,68 @@ def generar_clips(
         seccion_cantada = bool(sec["lineas"])
 
         # ── Fondo con vídeo IA (ComfyUI) ─────────────────────────────────────
-        if usar_video and i < len(escenas_plan):
-            try:
-                fondo_path = comfy_dir / f"s{i + 1:02d}.mp4"
-                comfy_video_builder.generar_fondo_seccion(
-                    provider, style_prefix, escenas_plan[i], dur, seed=i * 19 + 7,
-                    out_path=fondo_path, width=cw, height=ch, log_fn=_prog,
-                    should_cancel=_cancelado,
-                )
-                if voz_femenina and seccion_cantada:
-                    if voz_full is not None:
-                        voz_seg = voz_full.subclip(min(t_ini, voz_full.duration),
-                                                   min(t_fin, voz_full.duration))
-                    else:
-                        voz_seg = audio_clip
-                    voz_wav = comfy_dir / f"s{i + 1:02d}_voz.wav"
-                    voz_seg.write_audiofile(str(voz_wav), fps=16000, logger=None)
-                    synced = comfy_dir / f"s{i + 1:02d}_sync.mp4"
-                    comfy_video_builder.aplicar_lipsync(fondo_path, voz_wav, synced, log_fn=_prog)
-                    fondo_path = synced
+        def _construir_fondo_video():
+            """Genera el fondo de esta sección con ComfyUI y lo deja listo como
+            clip (escalado/recortado al encuadre). Lanza si algo falla."""
+            fondo_path = comfy_dir / f"s{i + 1:02d}.mp4"
+            comfy_video_builder.generar_fondo_seccion(
+                provider, style_prefix, escenas_plan[i], dur, seed=i * 19 + 7,
+                out_path=fondo_path, width=cw, height=ch, log_fn=_prog,
+                should_cancel=_cancelado,
+            )
+            if voz_femenina and seccion_cantada:
+                if voz_full is not None:
+                    voz_seg = voz_full.subclip(min(t_ini, voz_full.duration),
+                                               min(t_fin, voz_full.duration))
+                else:
+                    voz_seg = audio_clip
+                voz_wav = comfy_dir / f"s{i + 1:02d}_voz.wav"
+                voz_seg.write_audiofile(str(voz_wav), fps=16000, logger=None)
+                synced = comfy_dir / f"s{i + 1:02d}_sync.mp4"
+                comfy_video_builder.aplicar_lipsync(fondo_path, voz_wav, synced, log_fn=_prog)
+                fondo_path = synced
 
-                vfc = VideoFileClip(str(fondo_path))
-                fondos_video.append(vfc)
-                # Escala manteniendo aspecto y recorta al encuadre exacto (W×H)
-                escala = max(W / vfc.w, H / vfc.h)
-                vfc = vfc.resize(escala)
-                vfc = vfc.crop(x_center=vfc.w / 2, y_center=vfc.h / 2, width=W, height=H)
-                if vfc.duration < dur_v - 0.05:
-                    vfc = vfc.fx(vfx.loop, duration=dur_v)
-                fondo = vfc.set_duration(dur_v).set_position("center")
-            except MontajeCancelado:
-                print(f"[LyricVideo] cancelado por el usuario durante la sección {i + 1}.")
-                cancelado = True
-            except Exception as e:  # noqa: BLE001
-                print(f"[LyricVideo] Sección {i + 1}: falló el vídeo IA ({e}); "
-                      f"se usa imagen fija para esta sección.")
-                fondo = None
+            vfc = VideoFileClip(str(fondo_path))
+            fondos_video.append(vfc)
+            # Escala manteniendo aspecto y recorta al encuadre exacto (W×H)
+            escala = max(W / vfc.w, H / vfc.h)
+            vfc = vfc.resize(escala)
+            vfc = vfc.crop(x_center=vfc.w / 2, y_center=vfc.h / 2, width=W, height=H)
+            if vfc.duration < dur_v - 0.05:
+                vfc = vfc.fx(vfx.loop, duration=dur_v)
+            return vfc.set_duration(dur_v).set_position("center")
+
+        if usar_video and i < len(escenas_plan):
+            for intento in (0, 1):
+                try:
+                    fondo = _construir_fondo_video()
+                    break
+                except MontajeCancelado:
+                    print(f"[LyricVideo] cancelado por el usuario durante la sección {i + 1}.")
+                    cancelado = True
+                    break
+                except Exception as e:  # noqa: BLE001
+                    comfy_caido = not comfy_video_builder.comfy_disponible()
+                    puede_reintentar = (
+                        intento == 0 and comfy_caido and cc_puede_reiniciar
+                        and not reinicio_comfy_hecho
+                    )
+                    if puede_reintentar:
+                        reinicio_comfy_hecho = True
+                        print(f"[LyricVideo] Sección {i + 1}: ComfyUI no responde "
+                              f"({e}); pidiendo al Centro de Control que lo reinicie…")
+                        _prog("ComfyUI cayó · reiniciándolo")
+                        res = comfy_video_builder.arrancar_via_control_center(["comfyui"])
+                        ok = res.get("comfyui", {}).get("ok") and comfy_video_builder.comfy_disponible()
+                        if ok:
+                            print("[LyricVideo] ComfyUI reiniciado; se reintenta la sección.")
+                            continue
+                        print("[LyricVideo] no se pudo reiniciar ComfyUI; imagen fija.")
+                    else:
+                        print(f"[LyricVideo] Sección {i + 1}: falló el vídeo IA ({e}); "
+                              f"se usa imagen fija para esta sección.")
+                    fondo = None
+                    break
 
         if cancelado:
             break

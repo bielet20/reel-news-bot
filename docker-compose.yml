@@ -28,6 +28,9 @@ services:
     environment:
       # Apunta al venv CUDA construido en la imagen (fuera de /app)
       - SADTALKER_VENV=/opt/sadtalker_venv
+      # El sidecar de WhatsApp es otro servicio de compose; dentro de la red de
+      # Docker se le llega por su nombre, no por localhost.
+      - WA_SERVICE_URL=http://whatsapp:3001
       # Modelo de faster-whisper para sincronizar la letra con el audio.
       # 'small' (~460 MB, se baja solo la 1a vez al volumen hf_cache) transcribe
       # letra sobre música bastante mejor que 'base'. 'medium' aún mejor pero lento.
