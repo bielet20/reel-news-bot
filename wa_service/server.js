@@ -80,9 +80,16 @@ client.on("disconnected", (reason) => {
   state.connected = false;
   state.ready = false;
   console.log("[wa-service] Desconectado:", reason);
-  // Reinicializar tras 5s para reconectar automáticamente
-  setTimeout(() => {
+  // Reinicializar tras 5s para reconectar automáticamente. Hay que cerrar el
+  // navegador anterior: si no, queda vivo, sigue emitiendo "qr" (cada QR sale
+  // duplicado en el log) y pone ready=false aunque la sesión nueva ya esté lista.
+  setTimeout(async () => {
     console.log("[wa-service] Reinicializando cliente...");
+    try {
+      await client.destroy();
+    } catch (err) {
+      console.error("[wa-service] Error cerrando el cliente anterior:", err.message || err);
+    }
     client.initialize().catch((err) => {
       console.error("[wa-service] Error al reinicializar:", err.message || err);
     });
