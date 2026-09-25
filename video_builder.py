@@ -32,16 +32,11 @@ ANCHO, ALTO = 1080, 1920
 
 _AQUI = os.path.dirname(os.path.abspath(__file__))
 
-COLOR_TEXTO = (255, 255, 255, 255)
-COLOR_ACTIVO = (255, 209, 0, 255)  # dorado: resalta la palabra que se esta narrando
+COLOR_TEXTO  = (255, 255, 255, 255)
+COLOR_ACTIVO = (255, 230, 0, 255)   # amarillo vivo — resalta la palabra narrada
 
 
 def _resolver_fuente(nombre_local: str, candidatos_sistema: list) -> str:
-    """
-    Busca primero la fuente empaquetada en assets/fonts/ (funciona igual en
-    cualquier sistema operativo), y si no esta, prueba rutas tipicas de
-    fuentes del sistema (Linux/Mac/Windows) como respaldo.
-    """
     ruta_local = os.path.join(_AQUI, "assets", "fonts", nombre_local)
     if os.path.isfile(ruta_local):
         return ruta_local
@@ -49,65 +44,83 @@ def _resolver_fuente(nombre_local: str, candidatos_sistema: list) -> str:
         if os.path.isfile(ruta):
             return ruta
     raise FileNotFoundError(
-        f"No se encontro la fuente '{nombre_local}'. Asegurate de que la carpeta "
-        f"'assets/fonts/' este junto a video_builder.py, o instala DejaVu Sans "
-        f"en tu sistema."
+        f"No se encontro la fuente '{nombre_local}'. Pon la carpeta 'assets/fonts/' "
+        f"junto a video_builder.py."
     )
 
 
 FONT_BOLD = _resolver_fuente(
-    "DejaVuSans-Bold.ttf",
+    "Montserrat-Bold.ttf",
     [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
-        "/Library/Fonts/Arial Bold.ttf",  # Mac
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",  # Mac
-        "C:\\Windows\\Fonts\\arialbd.ttf",  # Windows
+        "assets/fonts/Montserrat-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/Library/Fonts/Arial Bold.ttf",
+        "C:\\Windows\\Fonts\\arialbd.ttf",
+    ],
+)
+FONT_EXTRABOLD = _resolver_fuente(
+    "Montserrat-ExtraBold.ttf",
+    [
+        "assets/fonts/Montserrat-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     ],
 )
 FONT_REGULAR = _resolver_fuente(
-    "DejaVuSans.ttf",
+    "Montserrat-Bold.ttf",      # Montserrat Bold como "regular" para mayor legibilidad
     [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
-        "/Library/Fonts/Arial.ttf",  # Mac
-        "/System/Library/Fonts/Supplemental/Arial.ttf",  # Mac
-        "C:\\Windows\\Fonts\\arial.ttf",  # Windows
+        "assets/fonts/Montserrat-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/Library/Fonts/Arial.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
     ],
 )
 
-# paletas de color (degradado) por tema
+# Paletas por tema — top oscuro, bottom con acento cromático saturado
 PALETAS = {
-    "tecnologia": ((10, 15, 40), (60, 20, 120)),
-    "negocios": ((10, 40, 30), (10, 90, 60)),
-    "mundo": ((20, 20, 20), (70, 10, 10)),
-    "ciencia": ((5, 30, 50), (10, 90, 130)),
-    "salud": ((0, 40, 40), (0, 100, 90)),
-    "deportes": ((40, 10, 10), (120, 30, 20)),
-    "entretenimiento": ((50, 10, 50), (140, 30, 120)),
-    "default": ((15, 15, 25), (50, 20, 90)),
+    "tecnologia":     ((5, 8, 22),   (45, 10, 100)),
+    "ia":             ((5, 8, 22),   (45, 10, 100)),
+    "negocios":       ((5, 18, 12),  (5, 70, 40)),
+    "mundo":          ((12, 8, 8),   (55, 8, 8)),
+    "ciencia":        ((4, 18, 32),  (8, 75, 120)),
+    "salud":          ((0, 22, 22),  (0, 85, 80)),
+    "deportes":       ((25, 5, 5),   (100, 20, 10)),
+    "entretenimiento":((30, 5, 30),  (115, 20, 100)),
+    "default":        ((8, 8, 18),   (38, 12, 80)),
 }
 
 
 def _crear_fondo_degradado(tema: str = "default") -> Image.Image:
-    """Degradado procedural con viñeta suave y grano, para que el fondo se
-    sienta menos plano que un simple degradado liso (sin depender de ninguna
-    imagen externa)."""
+    """Degradado procedural moderno: 3 puntos de color, viñeta fuerte y glow central."""
     color_arriba, color_abajo = PALETAS.get(tema, PALETAS["default"])
-    top = np.array(color_arriba, dtype=float)
-    bottom = np.array(color_abajo, dtype=float)
-    filas = np.linspace(0, 1, ALTO)[:, None] * (bottom - top) + top
-    gradiente = np.tile(filas[:, None, :], (1, ANCHO, 1)).astype(float)
+    top    = np.array(color_arriba, dtype=float)
+    bottom = np.array(color_abajo,  dtype=float)
+    mid    = ((top + bottom) / 2) * 1.15   # punto medio ligeramente más brillante
 
-    # Viñeta radial sutil: oscurece un poco las esquinas para dar profundidad
-    # y ayudar a que el texto centrado resalte mas.
+    t = np.linspace(0, 1, ALTO)[:, None]
+    # Curva suave (ease-in-out) con punto medio luminoso
+    mask_top = np.where(t < 0.5, 2 * t, 0)
+    mask_bot = np.where(t >= 0.5, 2 * (t - 0.5), 0)
+    gradiente = (
+        top    * np.clip(1 - 2 * t, 0, 1)
+        + mid  * (1 - np.abs(2 * t - 1))
+        + bottom * np.clip(2 * t - 1, 0, 1)
+    )
+    gradiente = np.tile(gradiente[:, None, :], (1, ANCHO, 1))
+
+    # Viñeta radial más agresiva para profundidad y que el texto resalte
     ys, xs = np.mgrid[0:ALTO, 0:ANCHO]
     cx, cy = ANCHO / 2, ALTO / 2
     dist = np.sqrt(((xs - cx) / cx) ** 2 + ((ys - cy) / cy) ** 2)
-    vineta = np.clip(1.0 - 0.35 * np.clip(dist - 0.4, 0, None), 0.55, 1.0)
+    vineta = np.clip(1.0 - 0.55 * np.clip(dist - 0.3, 0, None), 0.35, 1.0)
     gradiente *= vineta[:, :, None]
 
-    # Grano fino, para textura (evita el aspecto "banda plana" del degradado).
+    # Glow suave en la zona central (da sensación de profundidad/foco)
+    glow = np.exp(-0.5 * ((dist - 0) / 0.55) ** 2) * 18
+    gradiente += glow[:, :, None]
+
+    # Grano fino para eliminar banding
     rng = np.random.default_rng(abs(hash(tema)) % (2**32))
-    grano = rng.normal(0, 5.0, size=(ALTO, ANCHO, 1))
+    grano = rng.normal(0, 4.0, size=(ALTO, ANCHO, 1))
     gradiente += grano
 
     gradiente = np.clip(gradiente, 0, 255).astype("uint8")
@@ -123,6 +136,7 @@ def _fondo_desde_pexels(tema: str, api_key: str) -> "Image.Image | None":
     """
     consultas = {
         "tecnologia": "technology abstract dark",
+        "ia": "artificial intelligence abstract dark",
         "negocios": "business city skyline dark",
         "mundo": "world map globe dark",
         "ciencia": "science laboratory abstract dark",
@@ -199,13 +213,32 @@ def _envolver_texto(draw, texto, font, max_ancho):
     return lineas
 
 
+def _dibujar_texto_con_sombra(draw, texto, font, x, y, color=(255, 255, 255, 255),
+                               stroke_width: int = 4, sombra_capas: int = 3):
+    """Dibuja texto con stroke negro y sombra difusa multicapa — sin caja de fondo."""
+    # Sombra difusa (varias capas desplazadas en distintas intensidades)
+    for capa in range(sombra_capas, 0, -1):
+        offset = capa * 3
+        alpha_sombra = max(30, 110 - capa * 25)
+        sombra = (0, 0, 0, alpha_sombra)
+        for dx, dy in [(offset, offset), (-offset, offset), (0, offset)]:
+            draw.text((x + dx, y + dy), texto, font=font, fill=sombra)
+
+    # Stroke (contorno negro grueso) para legibilidad máxima
+    for dx in range(-stroke_width, stroke_width + 1):
+        for dy in range(-stroke_width, stroke_width + 1):
+            if dx == 0 and dy == 0:
+                continue
+            draw.text((x + dx, y + dy), texto, font=font, fill=(0, 0, 0, 210))
+
+    # Texto principal
+    draw.text((x, y), texto, font=font, fill=color)
+
+
 def _frame_texto(texto: str, font_path: str, tam_fuente: int, y_centro: int,
-                  max_ancho: int = 900, color_texto=(255, 255, 255, 255),
-                  con_fondo=True, max_lineas: int = 6, tam_fuente_min: int = 34) -> Image.Image:
-    """Crea una imagen RGBA (tamano del video) con el texto centrado, envuelto y
-    con una caja semi-transparente detras para legibilidad. Si el texto es largo,
-    reduce el tamano de fuente automaticamente para que no ocupe mas de
-    max_lineas lineas (evita que subtitulos largos se salgan de pantalla)."""
+                  max_ancho: int = 920, color_texto=(255, 255, 255, 255),
+                  con_fondo=False, max_lineas: int = 6, tam_fuente_min: int = 34) -> Image.Image:
+    """Texto centrado con sombra multicapa — sin caja de fondo para look más limpio."""
     img = Image.new("RGBA", (ANCHO, ALTO), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
@@ -216,84 +249,59 @@ def _frame_texto(texto: str, font_path: str, tam_fuente: int, y_centro: int,
         font = ImageFont.truetype(font_path, tam_fuente)
         lineas = _envolver_texto(draw, texto, font, max_ancho)
 
-    alturas_linea = tam_fuente + 14
+    alturas_linea = tam_fuente + 16
     alto_total = alturas_linea * len(lineas)
     y = y_centro - alto_total // 2
-
-    if con_fondo:
-        pad_x, pad_y = 40, 30
-        anchos = [draw.textbbox((0, 0), l, font=font)[2] for l in lineas]
-        ancho_caja = max(anchos) + pad_x * 2
-        draw.rounded_rectangle(
-            [
-                (ANCHO - ancho_caja) // 2,
-                y - pad_y,
-                (ANCHO + ancho_caja) // 2,
-                y + alto_total + pad_y,
-            ],
-            radius=30,
-            fill=(0, 0, 0, 150),
-        )
 
     for linea in lineas:
         bbox = draw.textbbox((0, 0), linea, font=font)
         ancho_linea = bbox[2] - bbox[0]
         x = (ANCHO - ancho_linea) // 2
-        draw.text((x, y), linea, font=font, fill=color_texto)
+        _dibujar_texto_con_sombra(draw, linea, font, x, y, color=color_texto)
         y += alturas_linea
 
     return img
 
 
 def _frame_texto_karaoke(palabras_chunk: list, idx_activo: int, font_path: str,
-                          tam_fuente: int, y_centro: int, max_ancho: int = 900) -> Image.Image:
-    """
-    Como _frame_texto, pero para un grupo pequeño de palabras (chunk) donde
-    una de ellas (idx_activo) se resalta en color distinto: es el frame que
-    se muestra mientras se narra esa palabra especifica, creando el efecto
-    de subtitulos "karaoke" palabra por palabra (estilo CapCut/reels virales).
-    """
+                          tam_fuente: int, y_centro: int, max_ancho: int = 940) -> Image.Image:
+    """Karaoke word-by-word estilo CapCut moderno: sin caja, stroke negro + sombra."""
     img = Image.new("RGBA", (ANCHO, ALTO), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(font_path, tam_fuente)
-    espacio = draw.textbbox((0, 0), "A A", font=font)[2] - draw.textbbox((0, 0), "AA", font=font)[2]
+    font_normal = ImageFont.truetype(font_path, tam_fuente)
+    # Palabra activa ligeramente más grande para énfasis
+    font_activo = ImageFont.truetype(font_path, int(tam_fuente * 1.08))
+    espacio = draw.textbbox((0, 0), "A A", font=font_normal)[2] - draw.textbbox((0, 0), "AA", font=font_normal)[2]
 
-    # Envolver el chunk en lineas (normalmente entra en una sola linea corta).
     lineas, linea_actual, ancho_actual = [], [], 0
-    for palabra in palabras_chunk:
-        w = draw.textbbox((0, 0), palabra, font=font)[2]
+    for i, palabra in enumerate(palabras_chunk):
+        fnt = font_activo if i == idx_activo else font_normal
+        w = draw.textbbox((0, 0), palabra, font=fnt)[2]
         extra = (espacio if linea_actual else 0) + w
         if linea_actual and ancho_actual + extra > max_ancho:
             lineas.append(linea_actual)
             linea_actual, ancho_actual = [], 0
             extra = w
-        linea_actual.append(palabra)
+        linea_actual.append((i, palabra, fnt))
         ancho_actual += extra
     if linea_actual:
         lineas.append(linea_actual)
 
-    alturas_linea = tam_fuente + 16
+    alturas_linea = tam_fuente + 20
     alto_total = alturas_linea * len(lineas)
     y = y_centro - alto_total // 2
 
-    def ancho_linea(linea):
-        return sum(draw.textbbox((0, 0), p, font=font)[2] for p in linea) + espacio * (len(linea) - 1)
+    def ancho_linea_px(linea):
+        return sum(draw.textbbox((0, 0), p, font=f)[2] for _, p, f in linea) + espacio * (len(linea) - 1)
 
-    pad_x, pad_y = 40, 30
-    ancho_caja = max(ancho_linea(l) for l in lineas) + pad_x * 2
-    draw.rounded_rectangle(
-        [(ANCHO - ancho_caja) // 2, y - pad_y, (ANCHO + ancho_caja) // 2, y + alto_total + pad_y],
-        radius=30, fill=(0, 0, 0, 150),
-    )
-
-    contador = 0
     for linea in lineas:
-        x = (ANCHO - ancho_linea(linea)) // 2
-        for palabra in linea:
-            color = COLOR_ACTIVO if contador == idx_activo else COLOR_TEXTO
-            draw.text((x, y), palabra, font=font, fill=color)
-            x += draw.textbbox((0, 0), palabra, font=font)[2] + espacio
-            contador += 1
+        x = (ANCHO - ancho_linea_px(linea)) // 2
+        for i_global, palabra, fnt in linea:
+            color = COLOR_ACTIVO if i_global == idx_activo else COLOR_TEXTO
+            stroke = 5 if i_global == idx_activo else 4
+            _dibujar_texto_con_sombra(draw, palabra, fnt, x, y, color=color,
+                                      stroke_width=stroke, sombra_capas=2)
+            x += draw.textbbox((0, 0), palabra, font=fnt)[2] + espacio
         y += alturas_linea
 
     return img
@@ -308,8 +316,8 @@ def _duraciones_proporcionales(palabras: list, duracion_total: float) -> list:
 
 
 def _clips_subtitulos_karaoke(frases: list, tiempos: list, font_path: str,
-                               tam_fuente: int = 64, y_centro: int = None,
-                               max_ancho: int = 880, palabras_por_chunk: int = 4):
+                               tam_fuente: int = 74, y_centro: int = None,
+                               max_ancho: int = 940, palabras_por_chunk: int = 5):
     """
     Genera un ImageClip por CADA PALABRA de cada frase, resaltandola dentro de
     su chunk (grupo de ~palabras_por_chunk palabras) mientras se narra, para
@@ -537,9 +545,10 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
             vfx.resize, lambda t: 1 + 0.06 * (t / max(duracion_audio, 0.01))
         ).set_position("center")
 
-    # titulo fijo arriba
+    # Título fijo arriba — ExtraBold más grande, con sombra, sin caja
     titulo_img = _frame_texto(
-        guion["titulo"], FONT_BOLD, 58, y_centro=220, max_ancho=940
+        guion["titulo"], FONT_EXTRABOLD, 62, y_centro=210, max_ancho=960,
+        color_texto=(255, 255, 255, 255),
     )
     titulo_clip = (
         ImageClip(np.array(titulo_img))

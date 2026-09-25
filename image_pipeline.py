@@ -242,7 +242,13 @@ def _buscar_pixabay(query: str, ruta_salida: str, api_key: str) -> Optional[str]
 
 def _generar_pollinations(prompt: str, ruta_salida: str, seed: Optional[int] = None) -> Optional[str]:
     """Genera imagen con Pollinations.ai (FLUX, gratis, sin API key)."""
-    prompt_limpio = re.sub(r"[^\w\s,.-]", " ", prompt).strip()
+    import unicodedata
+    # Eliminar emojis y no-ASCII, colapsar espacios, lowercase para mejor compatibilidad
+    prompt_ascii = unicodedata.normalize("NFKD", prompt).encode("ascii", "ignore").decode()
+    prompt_limpio = re.sub(r"[^\w\s,.-]", " ", prompt_ascii)
+    prompt_limpio = re.sub(r"\s+", " ", prompt_limpio).strip().lower()
+    if not prompt_limpio:
+        return None
     prompt_enc = urllib.parse.quote(
         f"{prompt_limpio}, news photography, cinematic lighting, dark moody, vertical"
     )
@@ -254,7 +260,7 @@ def _generar_pollinations(prompt: str, ruta_salida: str, seed: Optional[int] = N
 
     print(f"   -> Generando imagen IA para: {prompt[:60]}...")
     try:
-        resp = requests.get(url, timeout=90, stream=True)
+        resp = requests.get(url, timeout=30, stream=True)
         resp.raise_for_status()
         with open(ruta_salida, "wb") as f:
             for chunk in resp.iter_content(8192):
@@ -424,12 +430,101 @@ def preparar_imagenes(
                 imagenes.append(r)
                 continue
 
-            # Siempre generar con Pollinations como fallback garantizado
-            r = _generar_pollinations(query, ruta_ai, seed=abs(hash(query + str(i))) % 99999)
-            if r:
-                imagenes.append(r)
+            # Imágenes IA sólo si generar_ai está activo
+            if generar_ai:
+                r = _generar_pollinations(query, ruta_ai, seed=abs(hash(query + str(i))) % 99999)
+                if r:
+                    imagenes.append(r)
 
             if len(imagenes) >= n_ai:
                 break
 
     return imagenes
+
+
+# ── Funciones para miniaturas (1280×720) ──────────────────────────────────────
+
+def extraer_og_image(url: str, ruta_salida: str) -> Optional[str]:
+    """
+    Extrae og:image / twitter:image del artículo y lo descarga.
+    Devuelve la ruta si tiene éxito, None si no hay imagen o falla.
+    """
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(resp.text, "html.parser")
+        img_url = None
+        for attrs in (
+            {"property": "og:image"},
+            {"name": "twitter:image"},
+            {"name": "twitter:image:src"},
+        ):
+            tag = soup.find("meta", attrs=attrs)
+            if tag and tag.get("content"):
+                img_url = tag["content"]
+                break
+        if not img_url:
+            return None
+        img_url = urllib.parse.urljoin(url, img_url)
+        r = requests.get(img_url, headers=headers, timeout=15)
+        r.raise_for_status()
+        with open(ruta_salida, "wb") as f:
+            f.write(r.content)
+        img = Image.open(ruta_salida)
+        if img.width < 200 or img.height < 150:
+            os.unlink(ruta_salida)
+            return None
+        img.close()
+        return ruta_salida
+    except Exception as e:
+        print(f"[WARN image] og:image falló para {url}: {e}")
+        try:
+            if os.path.exists(ruta_salida):
+                os.unlink(ruta_salida)
+        except Exception:
+            pass
+        return None
+
+
+def generar_thumbnail_ai(prompt: str, ruta_salida: str) -> Optional[str]:
+    """
+    Genera imagen 1280×720 con Pollinations.ai para usar como miniatura de YouTube.
+    Distinto a _generar_pollinations que genera 1080×1920 para fondos de video.
+    """
+    import unicodedata
+    prompt_ascii = unicodedata.normalize("NFKD", prompt).encode("ascii", "ignore").decode()
+    prompt_limpio = re.sub(r"[^\w\s,.-]", " ", prompt_ascii)
+    prompt_limpio = re.sub(r"\s+", " ", prompt_limpio).strip().lower()
+    if not prompt_limpio:
+        return None
+    prompt_enc = urllib.parse.quote(
+        f"{prompt_limpio}, news photography, dramatic lighting, high quality photojournalism"
+    )
+    seed = abs(hash(prompt_limpio)) % 99999
+    url = (
+        f"https://image.pollinations.ai/prompt/{prompt_enc}"
+        f"?width=1280&height=720&seed={seed}&nologo=true&model=flux"
+    )
+    try:
+        print(f"   -> Generando miniatura IA: {prompt[:60]}...")
+        resp = requests.get(url, timeout=30, stream=True)
+        resp.raise_for_status()
+        with open(ruta_salida, "wb") as f:
+            for chunk in resp.iter_content(8192):
+                f.write(chunk)
+        img = Image.open(ruta_salida)
+        if img.width < 100:
+            os.unlink(ruta_salida)
+            return None
+        img.close()
+        return ruta_salida
+    except Exception as e:
+        print(f"[WARN image] Thumbnail IA falló: {e}")
+        try:
+            if os.path.exists(ruta_salida):
+                os.unlink(ruta_salida)
+        except Exception:
+            pass
+        return None

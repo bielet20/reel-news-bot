@@ -73,7 +73,9 @@ def subir_video(
     privacy: str = "SELF_ONLY",
 ) -> dict:
     """
-    Sube un video a TikTok via File Upload.
+    Sube un video a TikTok.
+
+    Intenta primero el método browser (cookies), luego la API oficial si hay token OAuth.
 
     Args:
         video_path: Ruta al archivo MP4.
@@ -81,8 +83,19 @@ def subir_video(
         privacy:    SELF_ONLY | FOLLOWER_OF_CREATOR | MUTUAL_FOLLOW_FRIENDS | PUBLIC_TO_EVERYONE
 
     Returns:
-        {"ok": True, "publish_id": str}
+        {"ok": True, ...}
     """
+    from pathlib import Path as _Path
+    cookies_file = _Path("/app/_config/tiktok_cookies.json")
+    if cookies_file.exists():
+        try:
+            from tiktok_browser_uploader import upload_video as _browser_upload
+            return _browser_upload(video_path, titulo=titulo, privacy=privacy)
+        except RuntimeError as e:
+            if "expirada" in str(e).lower() or "expired" in str(e).lower():
+                raise
+            print(f"[TikTok] Browser upload falló: {e} — reintentando con API…")
+
     token_data = _get_valid_token()
     access_token = token_data["access_token"]
 

@@ -80,11 +80,151 @@ from local_reel_builder import construir_reel_video_local
 CARPETA_SALIDA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 
+def generar_miniatura(
+    slug: str,
+    hook: str,
+    carpeta_salida: str,
+    url_articulo: str = None,
+    titulo: str = "",
+) -> str | None:
+    """
+    Genera miniatura 1280×720 para YouTube.
+    Prioridad de fondo: og:image del artículo → imagen IA (Pollinations) → gradiente.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import textwrap
+
+        W, H = 1280, 720
+        ruta = os.path.join(carpeta_salida, f"{slug}_thumbnail.jpg")
+        ruta_bg_tmp = ruta + ".bg_tmp.jpg"
+
+        # ── 1. Intentar og:image del artículo ─────────────────────────────────
+        img_fondo = None
+        if url_articulo and "news.google.com" not in (url_articulo or ""):
+            try:
+                from image_pipeline import extraer_og_image
+                img_fondo = extraer_og_image(url_articulo, ruta_bg_tmp)
+                if img_fondo:
+                    print("   -> Miniatura: usando og:image del artículo")
+            except Exception:
+                pass
+
+        # ── 2. Fallback: imagen IA 1280×720 ───────────────────────────────────
+        if not img_fondo:
+            try:
+                from image_pipeline import generar_thumbnail_ai
+                prompt = titulo or hook
+                img_fondo = generar_thumbnail_ai(prompt, ruta_bg_tmp)
+            except Exception:
+                pass
+
+        # ── 3. Construir imagen base ───────────────────────────────────────────
+        if img_fondo and os.path.exists(img_fondo):
+            base = Image.open(img_fondo).convert("RGB")
+            escala = max(W / base.width, H / base.height)
+            nuevo_w = int(base.width * escala) + 1
+            nuevo_h = int(base.height * escala) + 1
+            base = base.resize((nuevo_w, nuevo_h), Image.LANCZOS)
+            x0 = (nuevo_w - W) // 2
+            y0 = (nuevo_h - H) // 2
+            base = base.crop((x0, y0, x0 + W, y0 + H))
+            # Overlay oscuro para que el texto sea legible
+            overlay = Image.new("RGBA", (W, H), (0, 0, 0, 160))
+            img = Image.alpha_composite(base.convert("RGBA"), overlay).convert("RGB")
+        else:
+            img = Image.new("RGB", (W, H), color=(10, 10, 20))
+            draw_tmp = ImageDraw.Draw(img)
+            for y in range(H):
+                shade = int(10 + (y / H) * 25)
+                draw_tmp.line([(0, y), (W, y)], fill=(shade, shade, shade + 15))
+
+        draw = ImageDraw.Draw(img)
+
+        # Banda de acento superior
+        draw.rectangle([0, 0, W, 8], fill=(120, 60, 220))
+
+        # Fuente
+        font_size = 68
+        font = None
+        for font_name in (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/Library/Fonts/Arial Bold.ttf",
+        ):
+            if os.path.exists(font_name):
+                font = ImageFont.truetype(font_name, font_size)
+                break
+        if font is None:
+            font = ImageFont.load_default()
+
+        # Texto del hook centrado
+        hook_clean = hook.strip().rstrip(".")
+        if len(hook_clean) > 120:
+            hook_clean = hook_clean[:117] + "…"
+        lines = textwrap.wrap(hook_clean, width=26)[:3]
+
+        line_h = font_size + 14
+        block_h = len(lines) * line_h
+        y_start = (H - block_h) // 2 - 30
+
+        for i, line in enumerate(lines):
+            y = y_start + i * line_h
+            # Sombra
+            draw.text((W // 2 + 3, y + 3), line, font=font, fill=(0, 0, 0), anchor="mm")
+            draw.text((W // 2, y), line, font=font, fill=(255, 255, 255), anchor="mm")
+
+        # Banda inferior con nombre del canal
+        marca = os.environ.get("CANAL_NOMBRE", "BIELINFORMA")
+        try:
+            font_small = ImageFont.truetype(font.path, 30) if hasattr(font, "path") else ImageFont.load_default()
+        except Exception:
+            font_small = ImageFont.load_default()
+        draw.rectangle([0, H - 52, W, H], fill=(120, 60, 220))
+        draw.text((W // 2, H - 26), marca.upper(), font=font_small, fill=(255, 255, 255), anchor="mm")
+
+        # Limpiar fichero temporal de fondo
+        try:
+            if os.path.exists(ruta_bg_tmp):
+                os.unlink(ruta_bg_tmp)
+        except Exception:
+            pass
+
+        img.save(ruta, "JPEG", quality=92)
+        return ruta
+    except Exception as e:
+        print(f"   [WARN] No se pudo generar miniatura: {e}")
+        return None
+
+
 def _slug(texto: str, max_len: int = 60) -> str:
     texto = texto.lower()
     texto = re.sub(r"[^a-z0-9áéíóúñ\s-]", "", texto)
     texto = re.sub(r"\s+", "-", texto.strip())
     return texto[:max_len] or "reel"
+
+
+def _titulo_es_desde_guion(guion_texto: str, max_chars: int = 90) -> str:
+    """
+    Extrae un título en español del hook del guion generado por IA.
+    El guion siempre empieza con el hook en español («¿Sabías que...?»),
+    así que esto garantiza que el título del video sea siempre en español
+    independientemente del idioma original del artículo.
+    """
+    if not guion_texto:
+        return ""
+    # Saltar marcadores de acto en videos largos
+    texto = re.sub(r"^\[ACTO\s+\d+[^\]]*\]\s*", "", guion_texto.strip(), flags=re.IGNORECASE)
+    # Primera oración (hasta .  ?  !)
+    m = re.match(r"^([^.!?]{15,}?[.!?])", texto.strip())
+    if m:
+        titulo = m.group(1).strip()
+        if len(titulo) <= max_chars:
+            return titulo
+        # Truncar en la última palabra que quepa
+        return titulo[:max_chars].rsplit(" ", 1)[0].rstrip(".,;:") + "…"
+    return texto[:max_chars].rsplit(" ", 1)[0].strip()
 
 
 def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
@@ -99,15 +239,26 @@ def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
     from datetime import datetime, timezone
 
     at = atribucion or {}
+    verificadores = noticia.get("verificadores") or at.get("verificadores") or []
     fuente_completa = {
         "titulo_original": noticia.get("titulo", ""),
-        "fuente": noticia.get("fuente", ""),
+        "fuente": noticia.get("origen") or noticia.get("fuente", ""),
         "url_original": noticia.get("link", ""),
         "autor": at.get("autor", ""),
         "fecha_publicacion": at.get("fecha_publicacion", ""),
         "descripcion": at.get("descripcion", "") or noticia.get("resumen", ""),
         "seccion": at.get("seccion", ""),
         "url_autor": at.get("url_autor", ""),
+        "origen": noticia.get("origen") or noticia.get("fuente", ""),
+        "origen_tipo": noticia.get("origen_tipo", ""),
+        "verificadores": verificadores,
+        "fact_checkers": noticia.get("fact_checkers") or [],
+        "estado_verificacion": noticia.get("estado_verificacion", ""),
+        "documentacion": noticia.get("documentacion") or at.get("documentacion", ""),
+        "fuentes_confirmacion": noticia.get("fuentes_confirmacion") or [],
+        "fuentes_detalle": noticia.get("fuentes_detalle") or [],
+        "n_fuentes": noticia.get("n_fuentes", 1),
+        "confirmada": bool(noticia.get("confirmada")),
         "extraido_en": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -140,6 +291,24 @@ def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
     if fecha_pub: lineas.append(f"Publicado: {fecha_pub}")
     if seccion:   lineas.append(f"Sección:   {seccion}")
     if url_orig:  lineas.append(f"🔗 {url_orig}")
+    documentacion = fuente_completa.get("documentacion", "")
+    verificadores = fuente_completa.get("verificadores") or []
+    fact_checkers = fuente_completa.get("fact_checkers") or []
+    if documentacion:
+        lineas.append("")
+        lineas.append("✅ PROCEDENCIA Y VERIFICACIÓN")
+        lineas.append(documentacion)
+    if verificadores:
+        lineas.append(f"Contrastada por: {', '.join(verificadores)}")
+    if fact_checkers:
+        lineas.append(f"Fact-check: {', '.join(fact_checkers)}")
+    for det in fuente_completa.get("fuentes_detalle") or []:
+        org = det.get("org") or det.get("fuente")
+        url = det.get("url") or ""
+        rol = det.get("rol") or ""
+        if org and url and url != url_orig:
+            etiqueta = {"origen": "Origen", "contraste": "Contraste", "fact_check": "Fact-check"}.get(rol, "Fuente")
+            lineas.append(f"{etiqueta}: {org} — {url}")
     lineas.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     lineas += [
@@ -169,11 +338,12 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                       tipo: str = "articulo", imagenes: list = None,
                       generar_imagenes_ai: bool = False,
                       servicio_ai: str = "pollinations",
+                      largo: bool = False,
                       atribucion: dict = None,
                       ruta_avatar_img: str = None,
                       servicio_avatar: str = "auto",
-                      servicio_voz: str = "auto",
-                      voz: str = None,
+                      servicio_voz: str = "edge-tts",
+                      voz: str = "es-ES-AlvaroNeural",
                       marca: str = None,
                       mostrar_titulo: bool = False,
                       mostrar_subtitulos: bool = True,
@@ -211,22 +381,48 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
             texto_articulo = texto_completo
             print(f"   Artículo descargado: {len(texto_articulo.split())} palabras")
 
-    print("-> Generando guion del reel...")
-    guion = generar_guion_reel_claude(noticia["titulo"], texto_articulo,
-                                       noticia.get("fuente", ""), tipo=tipo)
+    if largo:
+        print("-> Generando guion LARGO (7-10 min)...")
+        from summarizer import generar_guion_largo
+        guion = generar_guion_largo(
+            noticia["titulo"], texto_articulo,
+            noticia.get("fuente", ""),
+            duracion_min=max(7, duracion_maxima // 60) if duracion_maxima > 120 else 8,
+            documentacion=noticia.get("documentacion", ""),
+        )
+        duracion_maxima = guion["duracion_estimada_seg"] + 30  # margen
+    else:
+        print("-> Generando guion del reel...")
+        if noticia.get("documentacion"):
+            print(f"   {noticia['documentacion']}")
+        guion = generar_guion_reel_claude(
+            noticia["titulo"], texto_articulo,
+            noticia.get("fuente", ""), tipo=tipo,
+            documentacion=noticia.get("documentacion", ""),
+        )
     print(f"   Guion ({guion['palabras']} palabras, ~{guion['duracion_estimada_seg']}s):")
     print(f"   {guion['guion']}")
 
+    # Título en español para el video/overlay: extraído del hook del guion (siempre en español)
+    titulo_es = _titulo_es_desde_guion(guion.get("guion", "")) or noticia["titulo"]
+    guion["titulo"] = titulo_es  # el video builder usa guion["titulo"] para el overlay
+
     os.makedirs(carpeta_salida, exist_ok=True)
     slug = _slug(noticia["titulo"])
-    ruta_audio = os.path.join(carpeta_salida, f"{slug}_audio.mp3")
-    ruta_video = os.path.join(carpeta_salida, f"{slug}_reel.mp4")
-    ruta_guion = os.path.join(carpeta_salida, f"{slug}_guion.txt")
+    sufijo = "_largo" if largo else "_reel"
+    ruta_audio = os.path.join(carpeta_salida, f"{slug}_audio{sufijo}.mp3")
+    ruta_video = os.path.join(carpeta_salida, f"{slug}{sufijo}.mp4")
+    ruta_guion = os.path.join(carpeta_salida, f"{slug}_guion{sufijo}.txt")
 
     with open(ruta_guion, "w", encoding="utf-8") as f:
-        f.write(f"Titulo: {noticia['titulo']}\n")
-        f.write(f"Fuente: {noticia.get('fuente', '')}\n")
-        f.write(f"Link: {noticia['link']}\n\n")
+        f.write(f"Titulo: {titulo_es}\n")
+        f.write(f"Fuente: {noticia.get('origen') or noticia.get('fuente', '')}\n")
+        f.write(f"Link: {noticia['link']}\n")
+        if noticia.get("documentacion"):
+            f.write(f"Procedencia: {noticia['documentacion']}\n")
+        if noticia.get("verificadores"):
+            f.write(f"Verificadores: {', '.join(noticia['verificadores'])}\n")
+        f.write("\n")
         f.write(guion["guion"])
 
     print("-> Generando audio narrado...")
@@ -239,7 +435,7 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
     carpeta_imgs = tempfile.mkdtemp(prefix="_imgs_")
     url_art = noticia.get("link") if not (noticia.get("link") or "").startswith("/") else None
     imgs_fondo = preparar_imagenes(
-        titulo=noticia["titulo"],
+        titulo=titulo_es,
         url_articulo=url_art,
         texto_articulo=texto_articulo or "",
         rutas_usuario=imagenes or [],
@@ -279,6 +475,17 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                     texto_personalizado=texto_personalizado)
     print(f"   Video generado: {ruta_video}")
 
+    # Generar miniatura para YouTube
+    hook_miniatura = titulo_es
+    url_art_thumb = noticia.get("link") if not (noticia.get("link") or "").startswith("/") else None
+    ruta_thumb = generar_miniatura(
+        slug, hook_miniatura, carpeta_salida,
+        url_articulo=url_art_thumb,
+        titulo=titulo_es,
+    )
+    if ruta_thumb:
+        print(f"   Miniatura generada: {ruta_thumb}")
+
     # Guardar atribución de la fuente original
     _guardar_atribucion(slug, carpeta_salida, noticia, atribucion)
 
@@ -296,15 +503,18 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
                   duracion_maxima: int = 60, imagenes: list = None,
                   generar_imagenes_ai: bool = False, servicio_ai: str = "pollinations",
                   ruta_avatar_img: str = None, servicio_avatar: str = "auto",
-                  servicio_voz: str = "auto", voz: str = None,
+                  servicio_voz: str = "edge-tts", voz: str = "es-ES-AlvaroNeural",
                   marca: str = None, mostrar_titulo: bool = False,
                   mostrar_subtitulos: bool = True,
                   musica_fondo: str = None, volumen_musica: float = 0.3,
-                  volumen_voz: float = 1.0, texto_personalizado: str = None) -> str:
+                  volumen_voz: float = 1.0, texto_personalizado: str = None,
+                  titulo_override: str = None) -> str:
     """
     Version de procesar_noticia() para cuando el usuario pega un link de
     articulo directamente (no viene de una busqueda por RSS). Descarga la
     pagina, extrae titulo/fuente/texto, y corre el mismo pipeline.
+    titulo_override: si se proporciona, sustituye al título extraído del artículo
+    (útil cuando el gestor ya tiene el título traducido al español).
     """
     print(f"\n=== Procesando link: {url} ===")
     print("-> Descargando y leyendo el articulo...")
@@ -329,7 +539,7 @@ def procesar_url(url: str, tema: str = "default", carpeta_salida: str = CARPETA_
         )
 
     noticia = {
-        "titulo": articulo["titulo"],
+        "titulo": titulo_override or articulo["titulo"],
         "link": articulo["link"],
         "fuente": articulo["fuente"],
         "resumen": "",
@@ -370,7 +580,14 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                      cantidad_shorts: int = 1,
                      cookies_browser: str = None,
                      auto_segmento: bool = True,
-                     mostrar_subtitulos: bool = True) -> list:
+                     mostrar_subtitulos: bool = True,
+                     servicio_voz: str = "edge-tts",
+                     voz: str = None,
+                     marca: str = None,
+                     mostrar_titulo: bool = False,
+                     musica_fondo: str = None,
+                     volumen_musica: float = 0.3,
+                     volumen_voz: float = 1.0) -> list:
     """
     Genera uno o varios reels a partir de un video de YouTube.
 
@@ -427,6 +644,11 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
 
     fuente = datos["canal"] or "YouTube"
     print(f"   Titulo: {datos['titulo']}  (canal: {fuente})")
+
+    from summarizer import _es_texto_en_espanol
+    if modo == "clip" and not _es_texto_en_espanol(datos["texto"]):
+        print("   -> Transcripcion en idioma extranjero. Forzando modo narrado para traducir al espanol de Espana.")
+        modo = "narrado"
 
     if modo == "clip":
         try:
@@ -487,7 +709,36 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
         noticia, tema="youtube", carpeta_salida=carpeta_salida,
         duracion_maxima=duracion_maxima, texto_articulo=datos["texto"],
         tipo="video",
+        servicio_voz=servicio_voz, voz=voz,
+        marca=marca,
+        mostrar_titulo=mostrar_titulo,
+        mostrar_subtitulos=mostrar_subtitulos,
+        musica_fondo=musica_fondo,
+        volumen_musica=volumen_musica,
+        volumen_voz=volumen_voz,
     )
+
+    # Si el titulo era en otro idioma, reemplazar en _guion.txt con el gancho
+    # espanol extraido del guion (primera oracion), para que las captions sean en espanol.
+    if not _es_texto_en_espanol(datos["titulo"]):
+        slug = _slug(datos["titulo"])
+        ruta_guion = os.path.join(carpeta_salida, f"{slug}_guion.txt")
+        try:
+            contenido = open(ruta_guion, encoding="utf-8").read()
+            lineas = contenido.splitlines()
+            # La primera oracion del cuerpo (despues de los metadatos) como titulo ES
+            cuerpo = "\n".join(l for l in lineas if not l.startswith(("Titulo:", "Fuente:", "Link:", "Procedencia:", "Verificadores:")))
+            primera_oracion = cuerpo.strip().split(".")[0].strip()
+            if primera_oracion and len(primera_oracion) > 10:
+                titulo_es = primera_oracion[:100]
+                nuevo = contenido.replace(
+                    next(l for l in lineas if l.startswith("Titulo:")),
+                    f"Titulo: {titulo_es}"
+                )
+                open(ruta_guion, "w", encoding="utf-8").write(nuevo)
+        except Exception:
+            pass
+
     return [ruta]
 
 
@@ -730,8 +981,9 @@ def leer_articulo_desde_archivo(ruta: str) -> dict:
         TITULO: El titulo de la noticia
         FUENTE: Nombre del sitio (opcional)
         LINK: https://... (opcional)
-
-        Aca va el cuerpo completo del articulo, tantos parrafos como quieras.
+        PROCEDENCIA: Sale de Reuters. Contrastada por BBC. (opcional)
+        VERIFICADORES: BBC, AP (opcional)
+        ESTADO: contrastada (opcional)
 
     Util cuando un sitio bloquea la descarga automatica (proteccion anti-bots,
     login, contenido cargado con JavaScript): copias el articulo a mano y se
@@ -741,15 +993,23 @@ def leer_articulo_desde_archivo(ruta: str) -> dict:
         contenido = f.read()
 
     titulo, fuente, link = "", "", ""
+    documentacion, verificadores_txt, estado = "", "", ""
     lineas = contenido.splitlines()
     idx_cuerpo = 0
     for i, linea in enumerate(lineas):
-        if linea.upper().startswith("TITULO:"):
+        upper = linea.upper()
+        if upper.startswith("TITULO:"):
             titulo = linea.split(":", 1)[1].strip()
-        elif linea.upper().startswith("FUENTE:"):
+        elif upper.startswith("FUENTE:"):
             fuente = linea.split(":", 1)[1].strip()
-        elif linea.upper().startswith("LINK:"):
+        elif upper.startswith("LINK:"):
             link = linea.split(":", 1)[1].strip()
+        elif upper.startswith("PROCEDENCIA:"):
+            documentacion = linea.split(":", 1)[1].strip()
+        elif upper.startswith("VERIFICADORES:"):
+            verificadores_txt = linea.split(":", 1)[1].strip()
+        elif upper.startswith("ESTADO:"):
+            estado = linea.split(":", 1)[1].strip()
         elif linea.strip() == "" and titulo:
             idx_cuerpo = i + 1
             break
@@ -767,14 +1027,24 @@ def leer_articulo_desde_archivo(ruta: str) -> dict:
             "del encabezado (TITULO/FUENTE/LINK + linea en blanco)."
         )
 
-    return {"titulo": titulo, "fuente": fuente, "link": link or ruta, "texto": texto}
+    verificadores = [v.strip() for v in verificadores_txt.split(",") if v.strip()]
+    return {
+        "titulo": titulo,
+        "fuente": fuente,
+        "link": link or ruta,
+        "texto": texto,
+        "documentacion": documentacion,
+        "verificadores": verificadores,
+        "estado_verificacion": estado,
+        "origen": fuente.split("·")[0].strip() if fuente else "",
+    }
 
 
 def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CARPETA_SALIDA,
                       duracion_maxima: int = 60, imagenes: list = None,
                       generar_imagenes_ai: bool = False, servicio_ai: str = "pollinations",
                       ruta_avatar_img: str = None, servicio_avatar: str = "auto",
-                      servicio_voz: str = "auto", voz: str = None,
+                      servicio_voz: str = "edge-tts", voz: str = "es-ES-AlvaroNeural",
                       marca: str = None, mostrar_titulo: bool = False,
                       mostrar_subtitulos: bool = True,
                       musica_fondo: str = None, volumen_musica: float = 0.3,
@@ -789,6 +1059,10 @@ def procesar_archivo(ruta: str, tema: str = "default", carpeta_salida: str = CAR
         "link": articulo["link"],
         "fuente": articulo["fuente"],
         "resumen": "",
+        "origen": articulo.get("origen") or articulo["fuente"],
+        "documentacion": articulo.get("documentacion", ""),
+        "verificadores": articulo.get("verificadores") or [],
+        "estado_verificacion": articulo.get("estado_verificacion", ""),
     }
     return procesar_noticia(noticia, tema, carpeta_salida=carpeta_salida,
                              duracion_maxima=duracion_maxima,
@@ -893,13 +1167,17 @@ def main():
                         help="Servicio de lip sync: 'auto' (D-ID si hay key, si no SadTalker), "
                              "'sadtalker' (local), 'did' (cloud, requiere DID_API_KEY).")
     # --- Voz TTS ---
-    parser.add_argument("--servicio-voz", default="auto",
+    parser.add_argument("--servicio-voz", default="edge-tts",
                         choices=["auto", "elevenlabs", "edge-tts"],
-                        help="Motor TTS: 'auto' (ElevenLabs si hay key, si no edge-tts), "
-                             "'elevenlabs' (premium, requiere ELEVENLABS_API_KEY), 'edge-tts' (gratis).")
-    parser.add_argument("--voz", default=None,
+                        help="Motor TTS: 'edge-tts' (gratis, default), "
+                             "'elevenlabs' (premium, requiere ELEVENLABS_API_KEY), "
+                             "'auto' (ElevenLabs si hay key, si no edge-tts).")
+    parser.add_argument("--voz", default="es-ES-AlvaroNeural",
                         help="Nombre de voz para edge-tts (ej: es-ES-AlvaroNeural) o "
                              "voice_id de ElevenLabs.")
+    parser.add_argument("--titulo", default=None, metavar="TEXTO",
+                        help="Título en español para el reel. Sobreescribe el título "
+                             "extraído del artículo (útil cuando la fuente está en otro idioma).")
     parser.add_argument("--sin-titulo", action="store_true",
                         help="No muestra el título en el video (solo en el nombre del archivo)")
     parser.add_argument("--sin-subtitulos", action="store_true",
@@ -939,6 +1217,8 @@ def main():
                         help="Cuantos items procesar (una por reel). Por defecto: 1.")
     parser.add_argument("--duracion-maxima", type=int, default=60,
                         help="Duracion maxima del video en segundos. Por defecto: 60.")
+    parser.add_argument("--largo", action="store_true",
+                        help="Genera un video largo (7-10 min) con guion de 4 actos en vez de un Short.")
     args = parser.parse_args()
 
     generados = []
@@ -1003,7 +1283,8 @@ def main():
                                     musica_fondo=args.musica_fondo,
                                     volumen_musica=args.volumen_musica,
                                     volumen_voz=args.volumen_voz,
-                                    texto_personalizado=args.texto_personalizado)
+                                    texto_personalizado=args.texto_personalizado,
+                                    titulo_override=args.titulo)
                 generados.append(ruta)
             except Exception:
                 print(f"[ERROR] Fallo al procesar el link '{link}':")
@@ -1048,6 +1329,13 @@ def main():
                     cookies_browser=args.cookies_browser,
                     auto_segmento=args.auto_segmento_youtube,
                     mostrar_subtitulos=not args.sin_subtitulos,
+                    servicio_voz=args.servicio_voz,
+                    voz=args.voz,
+                    marca=args.marca,
+                    mostrar_titulo=not args.sin_titulo,
+                    musica_fondo=args.musica_fondo,
+                    volumen_musica=args.volumen_musica,
+                    volumen_voz=args.volumen_voz,
                 )
                 generados.extend(rutas)
             except Exception:
@@ -1096,6 +1384,9 @@ def main():
                 ruta = procesar_youtube(
                     video["url"], duracion_maxima=args.duracion_maxima,
                     modo=args.modo_youtube,
+                    musica_fondo=args.musica_fondo,
+                    volumen_musica=args.volumen_musica,
+                    volumen_voz=args.volumen_voz,
                 )
                 generados.append(ruta)
                 procesados += 1
@@ -1124,7 +1415,8 @@ def main():
         for noticia in pool[: args.cantidad]:
             tema_tendencia = noticia.get("tema_tendencia", "trending")
             try:
-                ruta = procesar_noticia(noticia, "default", duracion_maxima=args.duracion_maxima)
+                ruta = procesar_noticia(noticia, "default", duracion_maxima=args.duracion_maxima,
+                                        largo=args.largo)
                 generados.append(ruta)
             except Exception:
                 print(f"[ERROR] Fallo al procesar '{noticia['titulo']}':")
@@ -1154,7 +1446,8 @@ def main():
     for noticia in pool[: args.cantidad]:
         tema_video = tema_por_noticia.get(noticia["titulo"], "default")
         try:
-            ruta = procesar_noticia(noticia, tema_video, duracion_maxima=args.duracion_maxima)
+            ruta = procesar_noticia(noticia, tema_video, duracion_maxima=args.duracion_maxima,
+                                    largo=args.largo)
             generados.append(ruta)
         except Exception:
             print(f"[ERROR] Fallo al procesar '{noticia['titulo']}':")

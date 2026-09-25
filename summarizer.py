@@ -237,16 +237,24 @@ def _construir_resultado(titulo: str, fuente: str, hook: str,
 # API publica: generacion de guion
 # ---------------------------------------------------------------------------
 
+def _es_texto_en_espanol(texto: str) -> bool:
+    """Heurística rápida: detecta si el texto tiene suficientes palabras españolas."""
+    palabras_es = set("que el la de los las en por para con una del sus más")
+    palabras = set(texto.lower().split()[:60])
+    return len(palabras & palabras_es) >= 3
+
+
 def generar_guion_reel(titulo: str, texto_completo: str, fuente: str = "",
                         max_palabras_total: int = 135,
                         tipo: str = "articulo") -> dict:
     """
     Genera el guion del reel sin IA, usando resumen extractivo.
-
-    tipo: "video" usa el resumidor especial para transcripciones habladas;
-          "articulo" (default) usa el resumidor para texto periodistico.
+    Si el texto está en otro idioma, usa solo el título para evitar
+    que el fallback produzca contenido en inglés.
     """
-    fuente_texto = texto_completo if len(texto_completo.split()) > 30 else titulo
+    # Si el texto no parece español, no usar extractivo (producirá inglés)
+    texto_es_espanol = _es_texto_en_espanol(texto_completo)
+    fuente_texto = texto_completo if (texto_es_espanol and len(texto_completo.split()) > 30) else titulo
     cierre = "Sígueme para más contenido explicado en 60 segundos."
 
     if tipo == "video":
@@ -254,8 +262,9 @@ def generar_guion_reel(titulo: str, texto_completo: str, fuente: str = "",
         hook = _hook_desde_video(titulo, puntos)
     else:
         puntos = resumen_extractivo(fuente_texto, n_oraciones=3)
-        if not puntos:
-            puntos = [titulo]
+        if not puntos or not texto_es_espanol:
+            # Construir puntos en español desde el título
+            puntos = [f"Esta noticia de {fuente} tiene un alto impacto informativo." if fuente else titulo]
         titulo_hook = titulo.split(":")[0].split(" - ")[0].strip()
         if len(titulo_hook) > 70:
             titulo_hook = _recortar_a_palabras(titulo_hook, 10)
@@ -342,9 +351,9 @@ def _llamar_groq(prompt: str, api_key: str) -> str:
 
 
 def _llamar_claude(prompt: str, api_key: str) -> str:
-    """Llama a Claude via SDK. Modelo configurable con CLAUDE_MODEL (default: claude-sonnet-5)."""
+    """Llama a Claude via SDK. Modelo configurable con CLAUDE_MODEL (default: claude-sonnet-4-6)."""
     import anthropic
-    modelo = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
+    modelo = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
         model=modelo,
@@ -356,7 +365,8 @@ def _llamar_claude(prompt: str, api_key: str) -> str:
 
 def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = "",
                                max_palabras_total: int = 135,
-                               tipo: str = "articulo") -> dict:
+                               tipo: str = "articulo",
+                               documentacion: str = "") -> dict:
     """
     Genera el guion usando IA. Orden de prioridad:
       1. Ollama (local, sin API, sin coste, sin internet)
@@ -389,7 +399,8 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
     if tipo == "video":
         prompt = _prompt_video(titulo, fuente, extracto, max_palabras_total)
     else:
-        prompt = _prompt_articulo(titulo, fuente, extracto, max_palabras_total)
+        prompt = _prompt_articulo(titulo, fuente, extracto, max_palabras_total,
+                                  documentacion=documentacion)
 
     def _validar_guion(texto: str) -> str:
         """Lanza ValueError si la IA indicó que el contenido es insuficiente."""
@@ -410,8 +421,8 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
         return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                 "cierre": "", "guion": guion_texto, "palabras": n,
                 "duracion_estimada_seg": round(n / 2.5, 1)}
-    except ValueError:
-        raise
+    except ValueError as e:
+        print(f"[WARN] Ollama: contenido insuficiente, probando siguiente proveedor...")
     except Exception as e:
         print(f"[WARN] Ollama no disponible: {e}")
 
@@ -425,8 +436,8 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
         return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                 "cierre": "", "guion": guion_texto, "palabras": n,
                 "duracion_estimada_seg": round(n / 2.5, 1)}
-    except ValueError:
-        raise
+    except ValueError as e:
+        print(f"[WARN] LM Studio: contenido insuficiente, probando siguiente proveedor...")
     except Exception as e:
         print(f"[WARN] LM Studio no disponible: {e}")
 
@@ -435,15 +446,15 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
     if claude_key:
         try:
             import anthropic  # noqa: F401
-            print(f"   -> Usando Claude ({os.environ.get('CLAUDE_MODEL', 'claude-sonnet-5')})...")
+            print(f"   -> Usando Claude ({os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-6')})...")
             guion_texto = _validar_guion(_llamar_claude(prompt, claude_key))
             guion_texto = _recortar_a_palabras(guion_texto, max_palabras_total)
             n = len(guion_texto.split())
             return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                     "cierre": "", "guion": guion_texto, "palabras": n,
                     "duracion_estimada_seg": round(n / 2.5, 1)}
-        except ValueError:
-            raise
+        except ValueError as e:
+            print(f"[WARN] Claude: contenido insuficiente, probando siguiente proveedor...")
         except ImportError:
             print("[WARN] Paquete 'anthropic' no instalado.")
         except Exception as e:
@@ -460,8 +471,8 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
             return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                     "cierre": "", "guion": guion_texto, "palabras": n,
                     "duracion_estimada_seg": round(n / 2.5, 1)}
-        except ValueError:
-            raise
+        except ValueError as e:
+            print(f"[WARN] Gemini: contenido insuficiente, probando siguiente proveedor...")
         except Exception as e:
             print(f"[WARN] Gemini API: {e}")
 
@@ -476,8 +487,8 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
             return {"titulo": titulo, "fuente": fuente, "hook": "", "puntos": [],
                     "cierre": "", "guion": guion_texto, "palabras": n,
                     "duracion_estimada_seg": round(n / 2.5, 1)}
-        except ValueError:
-            raise
+        except ValueError as e:
+            print(f"[WARN] Groq: contenido insuficiente, usando fallback extractivo...")
         except Exception as e:
             print(f"[WARN] Groq API: {e}")
 
@@ -487,46 +498,219 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
 
 def _prompt_video(titulo: str, fuente: str, transcripcion: str, max_palabras: int) -> str:
     return (
-        f"Eres un guionista de contenido viral para redes sociales.\n\n"
-        f"A continuacion tienes la transcripcion completa de un video de YouTube "
-        f"titulado \"{titulo}\" del canal \"{fuente}\".\n\n"
+        f"Eres un guionista experto en retención visual para YouTube Shorts y Reels.\n\n"
+        f"Transcripción del video \"{titulo}\" (canal: \"{fuente}\"):\n"
         f"TRANSCRIPCION:\n{transcripcion}\n\n"
-        f"Tu tarea:\n"
-        f"1. Entende de que trata el video: cual es el tema principal y que puntos "
-        f"importantes se mencionan realmente en el video.\n"
-        f"2. Escribe un guion en espanol para un reel de 60 segundos (maximo "
-        f"{max_palabras} palabras) que resuma fielmente el contenido del video.\n\n"
-        f"Estructura del guion (todo en un parrafo continuo, sin etiquetas):\n"
-        f"- HOOK: dato o pregunta impactante basada en algo que se dice en el video\n"
-        f"- PUNTOS CLAVE: 2-3 ideas centrales que se explican en el video\n"
-        f"- CIERRE: llamada a la accion breve\n\n"
-        f"IMPORTANTE: los puntos clave deben reflejar lo que realmente se habla en "
-        f"el video, no suposiciones generales sobre el tema. Usa SOLO datos y cifras "
-        f"que aparecen explicitamente en la transcripcion; no inventes ni agregues "
-        f"estadisticas o comparaciones que no esten presentes en el texto original.\n"
-        f"Tono: dinamico, conversacional. "
-        f"Devuelve SOLO el texto del guion, sin encabezados ni explicaciones."
+        f"IDIOMA OBLIGATORIO: TODO en español. Si la transcripción es en inglés, TRADUCE COMPLETAMENTE.\n\n"
+        f"Escribe el guion en español para un reel de 60 segundos (máximo {max_palabras} palabras).\n\n"
+        f"REGLAS DE RETENCIÓN VISUAL — aplica todas:\n"
+        f"1. RITMO: frases de máximo 8-10 palabras. Punto final. Cada frase es una pantalla.\n"
+        f"   MAL: 'OpenAI ha anunciado un nuevo modelo que supera a todos los anteriores en todas las métricas'\n"
+        f"   BIEN: 'OpenAI acaba de lanzar su mejor modelo. Supera todo lo anterior. Por mucho.'\n"
+        f"2. HOOK (primeras 3 segundos): dato más sorprendente del video + loop abierto.\n"
+        f"   Formato: '[Cifra/hecho impactante]. [Nombre conocido] acaba de [acción]. Y lo que sigue lo cambia todo.'\n"
+        f"   O: '¿Sabías que [marca/institución] acaba de [acción sorprendente]? Esto es lo que nadie te está contando.'\n"
+        f"3. DESARROLLO (3 revelaciones en escalada):\n"
+        f"   — Primero: el hecho básico con cifra exacta\n"
+        f"   — Segundo: la consecuencia o implicación (más impactante)\n"
+        f"   — Tercero: el dato que nadie esperaba / el giro (el más impactante)\n"
+        f"   Entre revelaciones usa exactamente UNA de estas transiciones:\n"
+        f"   'Pero esto no es todo.' / 'Y aquí viene lo importante:' / 'Lo que nadie esperaba:' / 'Ahora viene lo mejor:'\n"
+        f"4. CIERRE: pregunta polarizante que OBLIGUE a opinar. No genérica.\n"
+        f"   MAL: '¿Qué te parece? Deja tu comentario.'\n"
+        f"   BIEN: '¿Crees que [marca] está haciendo lo correcto o nos está manipulando? Dilo en los comentarios.'\n\n"
+        f"IMPORTANTE: usa SOLO datos del video. No inventes cifras ni hechos.\n"
+        f"Devuelve SOLO el texto del guion en español, sin etiquetas ni explicaciones."
     )
 
 
-def _prompt_articulo(titulo: str, fuente: str, texto: str, max_palabras: int) -> str:
+def _prompt_articulo(titulo: str, fuente: str, texto: str, max_palabras: int,
+                     documentacion: str = "") -> str:
+    atribucion = (
+        f"Procedencia verificada: {documentacion}\n"
+        f"Cita la fuente real una vez (ej: 'Segun {fuente or 'el medio'}'). "
+        f"Si hay medios que contrastan, mencionalos UNA vez. NO inventes fuentes.\n"
+        if documentacion else
+        f"Cita la fuente si se conoce: {fuente or 'no indicada'}. No inventes medios.\n"
+    )
     return (
-        f"Eres un guionista de contenido viral para redes sociales. "
-        f"Crea un guion en espanol para un reel vertical de 60 segundos "
-        f"(maximo {max_palabras} palabras en total) sobre esta noticia:\n\n"
+        f"Eres un guionista experto en retención visual para YouTube Shorts y Reels.\n"
+        f"Canal de noticias en ESPAÑOL para audiencia hispanohablante.\n\n"
+        f"Noticia: {titulo}\n"
+        f"Fuente: {fuente}\n"
+        f"{atribucion}"
+        f"Contenido: {texto}\n\n"
+        f"IDIOMA OBLIGATORIO: TODO en español. Si el contenido es en inglés, TRADUCE COMPLETAMENTE.\n\n"
+        f"Escribe el guion en español para un reel de 60 segundos (máximo {max_palabras} palabras).\n\n"
+        f"REGLAS DE RETENCIÓN VISUAL — aplica TODAS:\n"
+        f"1. RITMO: frases de máximo 8-10 palabras. Punto final. Cada frase es una pantalla.\n"
+        f"   MAL: 'La empresa ha anunciado un acuerdo histórico que cambiará la industria para siempre'\n"
+        f"   BIEN: 'Acuerdo histórico. La industria no volverá a ser la misma. Nunca.'\n"
+        f"2. HOOK (primeras 3 segundos — retención crítica): dato más sorprendente + loop abierto.\n"
+        f"   Formato A: '[Cifra impactante]. [Nombre conocido] acaba de [acción]. Y nadie lo vio venir.'\n"
+        f"   Formato B: '¿Sabías que [marca/institución] acaba de [acción]? Lo que sigue te va a sorprender.'\n"
+        f"   Formato C: '[Acción inesperada]. [Nombre conocido] lo acaba de confirmar. Esto lo cambia todo.'\n"
+        f"   NUNCA empieces con 'En', 'La', 'El', 'Un' ni con el titular plano.\n"
+        f"3. DESARROLLO (3 revelaciones en escalada — cada una más impactante):\n"
+        f"   — Revelación 1: el hecho central con cifra exacta si existe\n"
+        f"   — Transición obligatoria: 'Pero esto no es todo.' o 'Y aquí viene lo importante:' o 'Lo que nadie esperaba:'\n"
+        f"   — Revelación 2: la consecuencia real o el dato que sorprende\n"
+        f"   — Transición obligatoria: 'Pero espera.' o 'Ahora viene lo mejor:' o 'Y esto es lo que más impacta:'\n"
+        f"   — Revelación 3: el dato más impactante / el giro / la consecuencia que nadie dice\n"
+        f"4. CIERRE polarizante (genera debate, NO CTA genérica):\n"
+        f"   Formato: '¿Crees que [acción de la noticia] es [postura A] o [postura B contraria]? Dilo abajo.'\n"
+        f"   MAL: '¿Qué piensas? Deja tu comentario.'\n"
+        f"   BIEN: '¿Crees que [marca] está protegiendo a los usuarios o solo a sus beneficios? Dilo abajo.'\n\n"
+        f"REGLA CRÍTICA: usa SOLO información presente en el texto. Si el contenido es insuficiente, responde: CONTENIDO_INSUFICIENTE\n"
+        f"Devuelve SOLO el texto del guion en español, sin etiquetas ni explicaciones."
+    )
+
+
+def _prompt_largo(titulo: str, fuente: str, texto: str, max_palabras: int,
+                  documentacion: str = "") -> str:
+    """Prompt para generar un guion de 7-10 minutos estructurado en 4 actos."""
+    atribucion = (
+        f"Procedencia verificada: {documentacion}\n"
+        f"Cita la fuente real al menos una vez: \"{fuente or 'la fuente'}\". No inventes medios.\n"
+        if documentacion else
+        f"Cita la fuente si se conoce: {fuente or 'no indicada'}. No inventes.\n"
+    )
+    return (
+        f"Eres un guionista de documentales informativos virales para YouTube. "
+        f"Tu referencia son canales como Veritasium, Kurzgesagt y Vox: retienen al espectador "
+        f"durante 8-10 minutos porque cada minuto tiene una nueva revelacion que engancha.\n\n"
+        f"Escribe un guion en ESPANOL DE ESPANA para un video informativo de 7-10 minutos "
+        f"(entre {max_palabras - 100} y {max_palabras} palabras) sobre esta noticia:\n\n"
         f"Titulo: {titulo}\n"
         f"Fuente: {fuente}\n"
+        f"{atribucion}"
         f"Contenido: {texto}\n\n"
-        f"Estructura obligatoria (todo en un parrafo continuo, sin etiquetas):\n"
-        f"1. HOOK: pregunta o dato impactante que enganche en los primeros 3 segundos\n"
-        f"2. PUNTOS CLAVE: 2-3 datos mas importantes de la noticia\n"
-        f"3. CIERRE: llamada a la accion breve\n\n"
-        f"IMPORTANTE: usa UNICAMENTE informacion presente en el texto proporcionado. "
-        f"NO inventes datos, hechos, cifras ni detalles que no aparezcan en el contenido. "
-        f"Si el contenido es insuficiente para generar un guion util, responde exactamente: CONTENIDO_INSUFICIENTE\n\n"
-        f"Tono: dinamico, conversacional, directo. "
-        f"Devuelve SOLO el texto del guion, sin ningun encabezado ni explicacion."
+        f"IDIOMA OBLIGATORIO: todo en español. Traduce completamente si el texto es en inglés.\n\n"
+        f"REGLAS DE RITMO Y RETENCIÓN (aplica en todos los actos):\n"
+        f"- Frases de máximo 10 palabras. Punto final. Cada frase es una pantalla.\n"
+        f"- Nunca párrafos de más de 3 líneas seguidas — corta y continúa.\n"
+        f"- Usa transiciones de retención entre revelaciones:\n"
+        f"  'Pero esto no es todo.' / 'Y aquí viene lo importante:' / 'Pero espera.' / 'Lo que nadie dice:'\n\n"
+        f"ESTRUCTURA OBLIGATORIA EN 4 ACTOS (usa exactamente estas marcas de sección):\n\n"
+        f"[ACTO 1 - EL GANCHO] (aprox. 150 palabras)\n"
+        f"Empieza con la cifra o hecho MÁS sorprendente. Sin preámbulo.\n"
+        f"Ej: 'Novecientos cuarenta y seis millones. Eso acaba de pagar la NASA. Y nadie lo esperaba.'\n"
+        f"Presenta la pregunta central del video. Termina con loop abierto:\n"
+        f"'Pero lo que muy poca gente sabe es que detrás de esto hay algo mucho más grande.'\n\n"
+        f"[ACTO 2 - EL CONTEXTO] (aprox. 300 palabras)\n"
+        f"Historia de fondo: quién, qué, cuándo, cómo llegamos hasta aquí.\n"
+        f"3 puntos. Cada punto termina con frase que engancha al siguiente.\n"
+        f"Transiciones: 'pero eso no es lo más importante...' / 'y aquí viene lo que nadie esperaba...'\n\n"
+        f"[ACTO 3 - EL IMPACTO] (aprox. 350 palabras)\n"
+        f"Qué significa esto realmente. Consecuencias concretas. Quiénes ganan, quiénes pierden.\n"
+        f"Al menos 3 revelaciones en escalada (cada dato más impactante que el anterior).\n"
+        f"Incluye UNA comparación de magnitud (ej: 'equivale a construir 5.000 hospitales').\n\n"
+        f"[ACTO 4 - EL DEBATE] (aprox. 150 palabras)\n"
+        f"DOS perspectivas reales (a favor y crítica). No tomes partido.\n"
+        f"Cierra con la pregunta más polarizante posible.\n"
+        f"Ej: '¿Crees que los viajes espaciales deben depender de empresas privadas o del Estado? Dilo abajo.'\n\n"
+        f"REGLAS:\n"
+        f"- Usa SOLO información del texto. No inventes datos ni cifras\n"
+        f"- Si el contenido es insuficiente responde exactamente: CONTENIDO_INSUFICIENTE\n"
+        f"- Devuelve SOLO el guion con las marcas de sección, sin explicaciones adicionales"
     )
+
+
+def generar_guion_largo(titulo: str, texto_completo: str, fuente: str = "",
+                        duracion_min: int = 8,
+                        documentacion: str = "") -> dict:
+    """
+    Genera un guion de video largo (7-10 min) estructurado en 4 actos.
+    Ritmo: ~2.5 palabras/seg -> 8 min = ~1200 palabras.
+    Usa Claude Sonnet por defecto (mejor calidad para contenido largo).
+    """
+    palabras_texto = len(texto_completo.split())
+    if palabras_texto < 30 and len(titulo.split()) < 5:
+        raise ValueError(f"Contenido insuficiente para guion largo ({palabras_texto} palabras).")
+
+    max_palabras = int(duracion_min * 60 * 2.5)  # palabras objetivo segun duracion
+    extracto = texto_completo[:8000]
+
+    prompt = _prompt_largo(titulo, fuente, extracto, max_palabras, documentacion)
+
+    def _parse_guion(texto: str) -> dict:
+        """Extrae los 4 actos del guion y calcula metricas."""
+        if "CONTENIDO_INSUFICIENTE" in texto.upper():
+            raise ValueError("Contenido insuficiente para guion largo.")
+        actos = {}
+        marcas = ["[ACTO 1 - EL GANCHO]", "[ACTO 2 - EL CONTEXTO]",
+                  "[ACTO 3 - EL IMPACTO]", "[ACTO 4 - EL DEBATE]"]
+        partes = texto
+        for marca in marcas:
+            partes = partes.replace(marca, f"\n|||{marca}\n")
+        bloques = [b.strip() for b in partes.split("|||") if b.strip()]
+        guion_limpio = texto
+        for marca in marcas:
+            guion_limpio = guion_limpio.replace(marca, "").strip()
+        guion_limpio = "\n\n".join(b.strip() for b in guion_limpio.split("\n\n") if b.strip())
+        n = len(guion_limpio.split())
+        return {
+            "titulo": titulo,
+            "fuente": fuente,
+            "guion": guion_limpio,
+            "guion_con_marcas": texto,
+            "palabras": n,
+            "duracion_estimada_min": round(n / (2.5 * 60), 1),
+            "duracion_estimada_seg": round(n / 2.5),
+            "tipo": "largo",
+        }
+
+    # 1. Claude (mejor calidad para contenido largo)
+    claude_key = os.environ.get("ANTHROPIC_API_KEY")
+    if claude_key:
+        try:
+            import anthropic
+            modelo = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+            client = anthropic.Anthropic(api_key=claude_key)
+            print(f"   -> Generando guion largo con Claude ({modelo})...")
+            resp = client.messages.create(
+                model=modelo,
+                max_tokens=3000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return _parse_guion(resp.content[0].text.strip())
+        except Exception as e:
+            print(f"   [WARN] Claude largo: {e}")
+
+    # 2. Gemini fallback
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if gemini_key:
+        try:
+            import requests as _req
+            r = _req.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                json={"contents": [{"parts": [{"text": prompt}]}],
+                      "generationConfig": {"maxOutputTokens": 3000}},
+                timeout=60,
+            )
+            texto = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return _parse_guion(texto)
+        except Exception as e:
+            print(f"   [WARN] Gemini largo: {e}")
+
+    # 3. Groq fallback
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if groq_key:
+        try:
+            import requests as _req
+            r = _req.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}"},
+                json={"model": "llama-3.3-70b-versatile", "max_tokens": 3000,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=60,
+            )
+            texto = r.json()["choices"][0]["message"]["content"].strip()
+            return _parse_guion(texto)
+        except Exception as e:
+            print(f"   [WARN] Groq largo: {e}")
+
+    raise RuntimeError("No hay proveedor de IA disponible para generar guion largo.")
 
 
 if __name__ == "__main__":

@@ -41,6 +41,8 @@ def is_connected(platform: str) -> bool:
     token = load_token(platform)
     if not token:
         return False
+    if platform == "youtube":
+        return bool(token.get("refresh_token"))
     expires_at = token.get("expires_at")
     if expires_at:
         try:

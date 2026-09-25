@@ -27,7 +27,7 @@ def _recopilar(tema, pais, variado, n):
     """Obtiene noticias de fuentes verificadas, priorizando feeds directos."""
     from news_fetcher import (
         buscar_noticias, buscar_variadas, buscar_fuentes_directas,
-        buscar_tema_especializado, detectar_categoria,
+        buscar_tema_especializado, detectar_categoria, confirmar_historias,
     )
 
     try:
@@ -53,7 +53,6 @@ def _recopilar(tema, pais, variado, n):
             except Exception:
                 pass
 
-        # Deduplicar por título
         vistos = set()
         unicos = []
         for item in pool:
@@ -62,7 +61,7 @@ def _recopilar(tema, pais, variado, n):
                 vistos.add(key)
                 unicos.append(item)
 
-        return unicos[:n]
+        return confirmar_historias(unicos)[:n]
     except Exception as e:
         print(f"[curator] Error buscando noticias: {e}")
         return []
@@ -79,7 +78,11 @@ def _curar_con_ia(noticias, n, tema=None):
     lista_txt = "\n\n".join(
         f"{i+1}. TÍTULO: {item['titulo']}\n"
         f"   FUENTE: {item.get('fuente', '—')}"
-        f"{' ✓VERIFICADA' if item.get('fuente_verificada') else ''}\n"
+        f"{' ✓VERIFICADA' if item.get('fuente_verificada') else ''}"
+        f"{' ✓CONFIRMADA ' + str(item.get('n_fuentes', 1)) + ' medios' if item.get('confirmada') else ' (1 medio)'}\n"
+        f"   NIVEL: {item.get('nivel_fuente', 3)} (1=agencia/ciencia, 2=prensa, 3=especialista, 4=alerta/PR)\n"
+        f"   MEDIOS: {', '.join(item.get('fuentes_confirmacion') or [item.get('fuente', '—')])}\n"
+        f"   PROCEDENCIA: {item.get('documentacion', '')}\n"
         f"   RECENCIA: {item.get('recencia', {}).get('label', 'desconocida')}\n"
         f"   RESUMEN: {(item.get('resumen') or '')[:200]}"
         for i, item in enumerate(noticias)
@@ -92,31 +95,43 @@ def _curar_con_ia(noticias, n, tema=None):
         if tema else ""
     )
 
-    prompt = f"""Eres experto en contenido viral para redes sociales (TikTok, Instagram Reels, YouTube Shorts).
-Analiza estas {len(noticias)} noticias de fuentes verificadas y selecciona las {n} con MAYOR potencial viral.
+    prompt = f"""Eres experto en contenido viral para YouTube Shorts en español. Tu referencia es MrBeast: títulos cortos, cifras exactas, preguntas directas al espectador.
+Analiza estas {len(noticias)} noticias y selecciona las {n} con MAYOR potencial viral.
 {filtro_tema}
 {lista_txt}
 
 Criterios de puntuación (0-10):
-- 9-10: Impacto masivo, sorprendente, urgente, emotivo O primicia reciente (<2h)
-- 7-8: Interesante, relevante, genera opinión
-- 5-6: Útil o curioso para una audiencia específica
-- <5: No seleccionar (nunca incluir)
+- 9-10: Marca conocida (NASA, Apple, Tesla, SpaceX, Google, OpenAI...) + cifra impactante + primicia. O hecho que genere debate masivo.
+- 7-8: Tema con comunidad activa (IA, espacio, crypto, salud) + dato sorprendente
+- 5-6: Útil para audiencia específica pero sin gancho masivo
+- <5: No seleccionar
 
-REGLAS:
-- Primicias (<2h, <1h) reciben +2 puntos sobre su valor editorial base
-- Noticias recientes (<6h) reciben +1 punto
-- No selecciones noticias de hace más de 48h salvo impacto extraordinario
-- Prioriza variedad de sub-temas dentro de la categoría buscada{(chr(10) + f'- CRÍTICO: Si la noticia no es sobre «{tema}», NO la incluyas aunque sea interesante') if tema else ''}
+REGLAS DE PUNTUACIÓN:
+- +2 pts si la noticia tiene una cifra grande concreta ($1B+, millones de personas, récord mundial)
+- +2 pts si involucra 2+ marcas o instituciones conocidas (NASA+SpaceX, Apple+Google...)
+- +2 pts si es primicia (<2h) o muy reciente (<6h)
+- +2 pts si está CONFIRMADA por 2+ medios independientes
+- -2 pts si es política genérica sin cifras ni marcas conocidas
+- NIVEL 4 sin confirmar: no seleccionar
+- No seleccionar noticias de hace más de 48h salvo impacto extraordinario{(chr(10) + f'- CRÍTICO: Si la noticia no es sobre «{tema}», NO la incluyas aunque sea interesante') if tema else ''}
+
+TÍTULO DEL REEL (titulo_reel):
+IDIOMA OBLIGATORIO: el título DEBE estar en ESPAÑOL. Si la noticia es en inglés, tradúcela y adáptala.
+Sigue UNA de estas fórmulas MrBeast en español:
+1. "¿Sabías que [Marca] acaba de [acción] por [cifra]?" — máx 60 chars
+2. "[Marca] acaba de [acción sorprendente] y nadie lo esperaba" — máx 60 chars
+3. "¿[Pregunta que pone al espectador en la noticia]?" — máx 60 chars
+4. "[Cifra] [unidad] de [cosa]: lo que [Marca] acaba de hacer"
+NUNCA empieces con "La", "El", "Los", "Un" ni con el titular plano. NUNCA en inglés.
 
 Devuelve SOLO este JSON (sin texto adicional, sin markdown):
 {{
   "seleccionadas": [
     {{
       "indice": <número 1-{len(noticias)}>,
-      "titulo_reel": "<título impactante para el reel, máx 80 chars>",
+      "titulo_reel": "<título viral máx 60 chars siguiendo fórmulas MrBeast>",
       "score": <número 1-10 con un decimal>,
-      "categoria": "<tecnologia|economia|mundo|politica|ciencia|salud|deportes|entretenimiento|cripto>",
+      "categoria": "<tecnologia|ia|economia|mundo|politica|ciencia|salud|deportes|entretenimiento|cripto>",
       "gancho": "<por qué captará atención en 1 frase breve>",
       "audiencia": "<perfil de audiencia en 1 frase muy corta>"
     }}
@@ -158,7 +173,8 @@ Ordena por score descendente."""
                     "audiencia": item.get("audiencia", ""),
                     "fecha": orig.get("fecha", ""),
                     "recencia": orig.get("recencia", {}),
-                    "fuente_verificada": orig.get("fuente_verificada", False),
+                    **_campos_procedencia(orig),
+                    **_calcular_veracidad(orig),
                 })
         return sorted(resultado, key=lambda x: x["score"], reverse=True)
 
@@ -198,17 +214,88 @@ def _resolver_url(url: str) -> str:
 
 
 def _fallback_item(noticia, pos):
+    score = 8.5 - pos * 0.4
+    if noticia.get("confirmada"):
+        score += 1.5
+    nivel = noticia.get("nivel_fuente", 3)
+    score += {1: 1.0, 2: 0.5, 3: 0.0, 4: -1.0}.get(nivel, 0)
+    if nivel >= 4 and not noticia.get("confirmada"):
+        score = min(score, 4.5)
     return {
         "titulo": noticia["titulo"],
         "titulo_original": noticia["titulo"],
         "fuente": noticia.get("fuente", ""),
         "link": _resolver_url(noticia.get("link", "")),
         "resumen": noticia.get("resumen", ""),
-        "score": round(max(4.0, 8.5 - pos * 0.4), 1),
+        "score": round(max(4.0, min(10.0, score)), 1),
         "categoria": "general",
         "gancho": "",
         "audiencia": "",
         "fecha": noticia.get("fecha", ""),
         "recencia": noticia.get("recencia", {}),
-        "fuente_verificada": noticia.get("fuente_verificada", False),
+        **_campos_procedencia(noticia),
+        "nivel_fuente": nivel,
+    }
+
+
+def _calcular_veracidad(item: dict) -> dict:
+    """Calcula score de veracidad (0-100) y etiqueta a partir de metadatos de fuentes."""
+    nivel = item.get("nivel_fuente", 3)
+    confirmada = item.get("confirmada", False)
+    n_fuentes = item.get("n_fuentes", 1)
+    fuente_verificada = item.get("fuente_verificada", False)
+
+    score = 40  # base
+
+    if nivel == 1:    # agencia/ciencia
+        score += 35
+    elif nivel == 2:  # prensa
+        score += 20
+    elif nivel == 4:  # alerta/PR sin confirmar
+        score -= 20
+
+    if confirmada:
+        score += 20
+    if n_fuentes >= 3:
+        score += 15
+    elif n_fuentes == 2:
+        score += 8
+    if fuente_verificada:
+        score += 8
+
+    score = max(0, min(100, score))
+
+    if score >= 75:
+        label, color = "Verificada", "#4ade80"
+    elif score >= 45:
+        label, color = "En investigación", "#fbbf24"
+    else:
+        label, color = "Sin confirmar", "#f87171"
+
+    fuentes_list = item.get("fuentes_confirmacion") or ([item.get("fuente")] if item.get("fuente") else [])
+    evidencia = ", ".join(filter(None, fuentes_list[:4]))
+
+    return {
+        "veracidad_score": score,
+        "veracidad_label": label,
+        "veracidad_color": color,
+        "veracidad_evidencia": evidencia,
+    }
+
+
+def _campos_procedencia(orig: dict) -> dict:
+    return {
+        "fuente_verificada": orig.get("fuente_verificada", False),
+        "confirmada": orig.get("confirmada", False),
+        "n_fuentes": orig.get("n_fuentes", 1),
+        "fuentes_confirmacion": orig.get("fuentes_confirmacion", []),
+        "fuentes_detalle": orig.get("fuentes_detalle", []),
+        "nivel_fuente": orig.get("nivel_fuente", 3),
+        "origen": orig.get("origen") or orig.get("org_fuente") or orig.get("fuente", ""),
+        "origen_tipo": orig.get("origen_tipo", ""),
+        "verificadores": orig.get("verificadores", []),
+        "fact_checkers": orig.get("fact_checkers", []),
+        "estado_verificacion": orig.get("estado_verificacion", ""),
+        "documentacion": orig.get("documentacion", ""),
+        **_calcular_veracidad(orig),
     }

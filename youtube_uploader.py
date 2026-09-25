@@ -2,19 +2,54 @@
 youtube_uploader.py
 Sube videos generados a YouTube automáticamente.
 
-Requiere credenciales OAuth 2.0 de la YouTube Data API v3.
-Variables de entorno (.env):
-  YOUTUBE_CLIENT_ID
-  YOUTUBE_CLIENT_SECRET
-  YOUTUBE_REFRESH_TOKEN   ← obtenido con scripts/youtube_auth.py
+Credenciales (en orden de prioridad):
+  1. _tokens/youtube.json  ← guardado por el OAuth web (/canales)
+  2. Variables de entorno: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN
 
 Playlists gestionadas automáticamente:
   - "Últimas Noticias"   → tipo="noticia"
   - "Curiosidades"       → tipo="curiosidad"
 """
 
+import json
 import os
+import time
 from pathlib import Path
+
+
+# Traducciones de errores de la YouTube Data API a mensajes legibles
+_YT_ERROR_MESSAGES = {
+    "uploadLimitExceeded":      "Límite de subidas alcanzado. Verifica tu canal en youtube.com/verify con un número de teléfono para aumentar el límite.",
+    "quotaExceeded":            "Cuota diaria de la API agotada. Se resetea a medianoche (hora del Pacífico). Puedes solicitar más cuota en Google Cloud Console.",
+    "forbidden":                "Sin permiso para subir a este canal. Reconecta la cuenta en /canales.",
+    "authorizationRequired":    "Token de YouTube expirado. Reconecta la cuenta en /canales.",
+    "invalidCredentials":       "Credenciales de YouTube no válidas. Reconecta la cuenta en /canales.",
+    "dailyLimitExceeded":       "Límite diario de la API alcanzado. Se resetea a medianoche (hora del Pacífico).",
+    "rateLimitExceeded":        "Demasiadas peticiones seguidas. Espera unos minutos y reintenta.",
+    "videoNotFound":            "El archivo de vídeo no se encontró.",
+    "invalidVideoMetadata":     "Los metadatos del vídeo no son válidos (título o descripción incorrectos).",
+}
+
+
+def _yt_error_message(exc: Exception) -> str:
+    """Extrae un mensaje legible de un HttpError de la API de YouTube."""
+    try:
+        content = exc.content if hasattr(exc, "content") else b""
+        data = json.loads(content)
+        for err in data.get("error", {}).get("errors", []):
+            reason = err.get("reason", "")
+            if reason in _YT_ERROR_MESSAGES:
+                return _YT_ERROR_MESSAGES[reason]
+            msg = err.get("message", "")
+            if msg:
+                return msg
+    except Exception:
+        pass
+    raw = str(exc)
+    for reason, msg in _YT_ERROR_MESSAGES.items():
+        if reason in raw:
+            return msg
+    return str(exc)
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -28,12 +63,26 @@ _CAT_EDUCACION = "27"     # Education (curiosidades)
 # Cache de IDs de playlists para no llamar a la API repetidamente
 _playlist_cache: dict[str, str] = {}
 
+_TOKENS_FILE = Path(__file__).parent / "_tokens" / "youtube.json"
 
-def _get_service():
-    """Construye el cliente de YouTube con credenciales OAuth desde .env"""
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
-    from googleapiclient.discovery import build
+# Cache del servicio para no refrescar token en cada llamada
+_service_cache: dict = {"service": None, "expires_at": 0}
+
+
+def _load_credentials() -> tuple[str, str, str, str | None]:
+    """Devuelve (client_id, client_secret, refresh_token, access_token|None).
+    Prioriza _tokens/youtube.json (OAuth web) sobre las variables de entorno."""
+    if _TOKENS_FILE.exists():
+        try:
+            data = json.loads(_TOKENS_FILE.read_text(encoding="utf-8"))
+            client_id     = data.get("client_id") or os.environ.get("YOUTUBE_CLIENT_ID")
+            client_secret = data.get("client_secret") or os.environ.get("YOUTUBE_CLIENT_SECRET")
+            refresh_token = data.get("refresh_token")
+            access_token  = data.get("access_token")
+            if client_id and client_secret and refresh_token:
+                return client_id, client_secret, refresh_token, access_token
+        except Exception:
+            pass
 
     client_id     = os.environ.get("YOUTUBE_CLIENT_ID")
     client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET")
@@ -41,21 +90,52 @@ def _get_service():
 
     if not all([client_id, client_secret, refresh_token]):
         raise RuntimeError(
-            "Faltan credenciales de YouTube. Configura YOUTUBE_CLIENT_ID, "
-            "YOUTUBE_CLIENT_SECRET y YOUTUBE_REFRESH_TOKEN en el .env. "
-            "Ejecuta 'python scripts/youtube_auth.py' para obtener el refresh token."
+            "Faltan credenciales de YouTube. Conecta la cuenta en /canales o "
+            "configura YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET y "
+            "YOUTUBE_REFRESH_TOKEN en el .env."
         )
+    return client_id, client_secret, refresh_token, None
+
+
+def _get_service():
+    """Devuelve el cliente de YouTube, reutilizando el service si el token sigue vigente."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    if _service_cache["service"] and time.time() < _service_cache["expires_at"]:
+        return _service_cache["service"]
+
+    client_id, client_secret, refresh_token, access_token = _load_credentials()
 
     creds = Credentials(
-        token=None,
+        token=access_token,
         refresh_token=refresh_token,
         client_id=client_id,
         client_secret=client_secret,
         token_uri="https://oauth2.googleapis.com/token",
         scopes=SCOPES,
     )
-    creds.refresh(Request())
-    return build("youtube", "v3", credentials=creds)
+
+    if not creds.valid:
+        creds.refresh(Request())
+        if _TOKENS_FILE.exists():
+            try:
+                data = json.loads(_TOKENS_FILE.read_text(encoding="utf-8"))
+                data["access_token"] = creds.token
+                _TOKENS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
+
+    service = build("youtube", "v3", credentials=creds)
+    expiry = creds.expiry.timestamp() - 60 if creds.expiry else time.time() + 3540
+    _service_cache.update({"service": service, "expires_at": expiry})
+    return service
+
+
+def invalidate_service_cache():
+    """Limpia el cache del servicio (llamar tras reconectar la cuenta)."""
+    _service_cache.update({"service": None, "expires_at": 0})
 
 
 def _playlist_id(service, nombre: str, descripcion: str = "") -> str:
@@ -106,6 +186,15 @@ def _descripcion(titulo: str, tipo: str, attribution: dict | None) -> str:
         if fuente:   lineas.append(f"📰 Fuente: {fuente}")
         if autor:    lineas.append(f"✍️ Autor: {autor}")
         if fecha:    lineas.append(f"📅 Publicado: {fecha}")
+        documentacion = attribution.get("documentacion", "")
+        verificadores = attribution.get("verificadores") or []
+        fact_checkers = attribution.get("fact_checkers") or []
+        if documentacion:
+            lineas.append(f"✅ {documentacion}")
+        if verificadores:
+            lineas.append(f"🔎 Contrastada por: {', '.join(verificadores)}")
+        if fact_checkers:
+            lineas.append(f"🛡️ Fact-check: {', '.join(fact_checkers)}")
         if url_orig: lineas.append(f"🔗 Artículo completo: {url_orig}")
     else:
         lineas.append("Noticias verificadas: El País, Reuters, BBC Mundo y más.")
@@ -129,6 +218,7 @@ def subir_video(
     tipo: str = "noticia",
     attribution: dict | None = None,
     tags_extra: list[str] | None = None,
+    thumbnail_path: str | None = None,
 ) -> dict:
     """
     Sube un video MP4 a YouTube y lo añade a la playlist correspondiente.
@@ -197,6 +287,18 @@ def subir_video(
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     print(f"[YouTube] ¡Publicado! {video_url}")
 
+    # Subir miniatura personalizada
+    if thumbnail_path and __import__("os").path.isfile(thumbnail_path):
+        try:
+            from googleapiclient.http import MediaFileUpload as _MFU
+            service.thumbnails().set(
+                videoId=video_id,
+                media_body=_MFU(thumbnail_path, mimetype="image/jpeg"),
+            ).execute()
+            print(f"[YouTube] Miniatura subida: {thumbnail_path}")
+        except Exception as e:
+            print(f"[YouTube][WARN] No se pudo subir miniatura: {e}")
+
     # Añadir a la playlist
     playlist_nombre = "Últimas Noticias" if tipo == "noticia" else "Curiosidades"
     playlist_desc   = (
@@ -225,12 +327,10 @@ def subir_video(
 
 def verificar_credenciales() -> dict:
     """Comprueba si las credenciales están configuradas y son válidas."""
-    if not all([
-        os.environ.get("YOUTUBE_CLIENT_ID"),
-        os.environ.get("YOUTUBE_CLIENT_SECRET"),
-        os.environ.get("YOUTUBE_REFRESH_TOKEN"),
-    ]):
-        return {"ok": False, "motivo": "Faltan variables en .env"}
+    try:
+        _load_credentials()
+    except RuntimeError as e:
+        return {"ok": False, "motivo": str(e)}
 
     try:
         service = _get_service()

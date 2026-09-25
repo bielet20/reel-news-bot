@@ -36,6 +36,23 @@ def _get_credentials() -> tuple[str, str]:
     return bot_token, chat_id
 
 
+def enviar_mensaje(texto: str, chat_id: str = None) -> dict:
+    """Envía un mensaje de texto a un chat/canal de Telegram."""
+    bot_token, default_chat_id = _get_credentials()
+    target = chat_id or default_chat_id
+    url = _BASE.format(token=bot_token, method="sendMessage")
+    resp = requests.post(url, data={
+        "chat_id": target,
+        "text": texto,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": "false",
+    }, timeout=15)
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Telegram API error: {data.get('description', data)}")
+    return {"ok": True, "message_id": data["result"]["message_id"]}
+
+
 def subir_video(video_path: str, caption: str = "", chat_id: str = None) -> dict:
     """Envía un video a un chat/canal de Telegram.
 

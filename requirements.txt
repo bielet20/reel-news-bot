@@ -28,6 +28,8 @@ elevenlabs
 google-api-python-client
 google-auth
 google-auth-oauthlib
+# Distribución automática a Reddit
+praw
 # Opcional: para transcribir videos locales con --video (requiere ffmpeg)
 # openai-whisper
 # Sincroniza la letra con el audio en el Montaje (word timestamps, CPU, sin torch).
@@ -35,3 +37,5 @@ google-auth-oauthlib
 # (montado como volumen en docker-compose para que persista).
 faster-whisper
 click<8.2
+# Scraping de sitios con antibot/JS (fallback sobre requests)
+playwright>=1.44.0

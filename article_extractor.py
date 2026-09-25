@@ -125,20 +125,80 @@ def _extraer_parrafos(soup: BeautifulSoup, min_len_parrafo: int) -> str:
     return "\n".join(parrafos)
 
 
+_UMBRAL_PALABRAS_PLAYWRIGHT = 80
+
+
+def _descargar_con_playwright(url: str, timeout: int = 20) -> str:
+    """
+    Carga la página con Chromium headless (Playwright) simulando un navegador
+    real. Usar como fallback cuando requests devuelve poco texto por antibot/JS.
+    """
+    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        )
+        ctx = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+            locale="es-ES",
+            extra_http_headers={
+                "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        page = ctx.new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            page.wait_for_timeout(2500)
+        except PWTimeout:
+            pass
+        html = page.content()
+        browser.close()
+        return html
+
+
 def extraer_texto(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> str:
     """
-    Descarga la pagina y concatena los parrafos <p> con texto sustancial,
-    descartando avisos de cookies/paywalls/newsletters.
-    Devuelve un string vacio si falla (el pipeline debe usar el resumen del RSS
-    como respaldo en ese caso).
+    Descarga la pagina y concatena los parrafos <p> con texto sustancial.
+    Si requests devuelve menos de _UMBRAL_PALABRAS_PLAYWRIGHT palabras (antibot/JS),
+    reintenta con Chromium headless simulando un navegador real.
     """
     try:
         html = _descargar(url, timeout=timeout)
-    except Exception:
-        return ""
+        soup = BeautifulSoup(html, "html.parser")
+        texto = _extraer_parrafos(soup, min_len_parrafo)
 
-    soup = BeautifulSoup(html, "html.parser")
-    return _extraer_parrafos(soup, min_len_parrafo)
+        # Twitter/X: todo es JS, el tweet está en og:description
+        if _es_twitter(url) and len(texto.split()) < 30:
+            og = soup.find("meta", property="og:description")
+            if og and og.get("content"):
+                return og["content"].strip()
+    except Exception:
+        texto = ""
+
+    if len(texto.split()) >= _UMBRAL_PALABRAS_PLAYWRIGHT:
+        return texto
+
+    # Fallback: Playwright
+    try:
+        print("   [antibot] Reintentando con Chromium headless...")
+        html_pw = _descargar_con_playwright(url, timeout=20)
+        texto_pw = _extraer_parrafos(BeautifulSoup(html_pw, "html.parser"), min_len_parrafo)
+        if len(texto_pw.split()) > len(texto.split()):
+            print(f"   [antibot] Playwright extrajo {len(texto_pw.split())} palabras")
+            return texto_pw
+    except ImportError:
+        pass  # playwright no instalado, continuar con lo que hay
+    except Exception as e:
+        print(f"   [antibot] Playwright falló: {e}")
+
+    return texto
 
 
 def _extraer_titulo(soup: BeautifulSoup) -> str:
@@ -290,6 +350,11 @@ def _extraer_url_autor(url: str, soup: BeautifulSoup) -> str:
     return ""
 
 
+def _es_twitter(url: str) -> bool:
+    netloc = urllib.parse.urlparse(url).netloc.lower()
+    return netloc in ("x.com", "twitter.com", "www.x.com", "www.twitter.com")
+
+
 def extraer_articulo(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> dict:
     """
     Descarga una URL de articulo y devuelve un dict con el contenido y los
@@ -308,6 +373,19 @@ def extraer_articulo(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> 
     url_autor = _extraer_url_autor(url, soup)
 
     texto = _extraer_parrafos(soup, min_len_parrafo)
+
+    # Twitter/X carga todo con JS — los <p> no tienen el tweet.
+    # og:description sí tiene el texto completo del tweet.
+    if _es_twitter(url) and descripcion:
+        texto = descripcion
+        # og:title es "Nombre (@handle) on X" — usar el tweet como título
+        if titulo.endswith(" on X") or titulo.endswith(" en X") or "(@" in titulo:
+            titulo = descripcion[:80].rstrip() + ("…" if len(descripcion) > 80 else "")
+        fuente = "X (Twitter)"
+
+    # Fallback general: si los <p> dieron poco pero hay og:description, usarla.
+    if len(texto.split()) < 30 and descripcion:
+        texto = descripcion
 
     return {
         "titulo": titulo,

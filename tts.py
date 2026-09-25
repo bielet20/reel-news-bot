@@ -171,7 +171,7 @@ def listar_voces_elevenlabs() -> list:
 
 
 def generar_audio(texto: str, ruta_salida: str, idioma: str = "es", lento: bool = False,
-                   voz: str = None, servicio: str = "auto",
+                   voz: str = None, servicio: str = "edge-tts",
                    apply_pronunciation: bool = True) -> str:
     """
     Genera audio narrado. Devuelve la ruta del archivo.

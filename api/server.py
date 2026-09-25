@@ -55,12 +55,28 @@ from api.hotspots import router as hotspots_router
 from api.library import router as library_router, LIBRARY_DIR
 from api.templates import router as templates_router
 from api.music import router as music_router, MUSIC_DIR
+from api.admin import router as admin_router
+from api.credentials import router as credentials_router  # injects env vars at import
 from api.accounts import router as accounts_router
 from api.publish import router as publish_router
 from api.music_clip import router as music_clip_router
 from api.article_index import router as article_index_router
 from api.storage import router as storage_router
+from api.gestor import router as gestor_router
+from api.threads import router as threads_router
+from api.prefs import router as prefs_router
+from api.scanner import router as scanner_router
+from api.yt_scanner import router as yt_scanner_router
+from api.autopublisher import router as autopublisher_router
+from api.distribucion import router as distribucion_router
+app.include_router(admin_router)
+app.include_router(credentials_router)
 app.include_router(hotspots_router)
+app.include_router(gestor_router)
+app.include_router(threads_router)
+app.include_router(prefs_router)
+app.include_router(scanner_router)
+app.include_router(yt_scanner_router)
 app.include_router(library_router)
 app.include_router(templates_router)
 app.include_router(music_router)
@@ -69,6 +85,8 @@ app.include_router(publish_router)
 app.include_router(music_clip_router)
 app.include_router(article_index_router)
 app.include_router(storage_router)
+app.include_router(autopublisher_router)
+app.include_router(distribucion_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -81,8 +99,53 @@ app.mount("/videos", StaticFiles(directory=str(OUTPUT_DIR)), name="videos")
 app.mount("/library-files", StaticFiles(directory=str(LIBRARY_DIR)), name="library")
 app.mount("/music-files", StaticFiles(directory=str(MUSIC_DIR)), name="music")
 
-jobs: dict = {}
-jobs_lock = threading.Lock()
+from api.jobs_store import jobs, jobs_lock  # noqa: E402  shared state — gestor.py reads it directly
+
+# ── Job persistence ────────────────────────────────────────────────────────────
+
+_CONFIG_DIR = CORE_DIR / "_config"
+_CONFIG_DIR.mkdir(exist_ok=True)
+_JOBS_FILE = _CONFIG_DIR / "jobs.json"
+
+# Fields we don't persist (too large or session-only)
+_SKIP_FIELDS = {"logs", "log_file"}
+
+
+def _jobs_persist():
+    """Guarda el estado de todos los jobs en disco (sin los logs completos)."""
+    try:
+        snapshot = {
+            jid: {k: v for k, v in job.items() if k not in _SKIP_FIELDS}
+            for jid, job in jobs.items()
+        }
+        _JOBS_FILE.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"[Jobs] Error guardando jobs.json: {e}")
+
+
+def _jobs_load():
+    """Carga jobs persistidos al arrancar. Los jobs 'running'/'pending' se marcan failed."""
+    if not _JOBS_FILE.exists():
+        return
+    try:
+        saved = json.loads(_JOBS_FILE.read_text(encoding="utf-8"))
+        for jid, job in saved.items():
+            # Rellenar campos que no se persistieron
+            job.setdefault("logs", "")
+            job.setdefault("log_file", None)
+            if job.get("status") in ("running", "pending"):
+                job["status"] = "failed"
+                job["error"] = "Servidor reiniciado — vuelve a generar"
+                job["completed_at"] = datetime.now().isoformat()
+            jobs[jid] = job
+        print(f"[Jobs] {len(saved)} jobs cargados desde disco.")
+    except Exception as e:
+        print(f"[Jobs] Error cargando jobs.json: {e}")
+
+
+_jobs_load()
 
 
 class GenerateRequest(BaseModel):
@@ -106,8 +169,8 @@ class GenerateRequest(BaseModel):
     avatar_imagen: Optional[str] = None
     avatar_servicio: str = "auto"
     # Voz TTS
-    servicio_voz: str = "auto"
-    voz: Optional[str] = None
+    servicio_voz: str = "edge-tts"
+    voz: Optional[str] = "es-ES-AlvaroNeural"
     # Marca/watermark en el video (None = sin marca)
     marca: Optional[str] = None
     mostrar_titulo: bool = True
@@ -125,6 +188,11 @@ class GenerateRequest(BaseModel):
     # Publicación en YouTube
     tipo_contenido: str = "noticia"   # "noticia" | "curiosidad"
     subir_youtube: bool = False
+    procedencia: Optional[str] = None
+    verificadores: Optional[str] = None
+    estado_verificacion: Optional[str] = None
+    # Video largo (7-10 min, 4 actos)
+    largo: bool = False
 
 
 def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> list:
@@ -166,6 +234,8 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
     args += ["--servicio-voz", req.servicio_voz]
     if req.voz:
         args += ["--voz", req.voz]
+    if req.titulo:
+        args += ["--titulo", req.titulo]
     if req.marca:
         args += ["--marca", req.marca]
     if not req.mostrar_titulo:
@@ -180,6 +250,8 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
     args += ["--volumen-voz", str(req.volumen_voz)]
     if req.texto_personalizado and req.texto_personalizado.strip():
         args += ["--texto-personalizado", req.texto_personalizado.strip()]
+    if req.largo:
+        args += ["--largo"]
 
     return args
 
@@ -200,6 +272,12 @@ def _run_job(job_id: str, req: GenerateRequest):
                     f.write(f"FUENTE: {req.fuente}\n")
                 if req.url_fuente:
                     f.write(f"LINK: {req.url_fuente}\n")
+                if req.procedencia:
+                    f.write(f"PROCEDENCIA: {req.procedencia}\n")
+                if req.verificadores:
+                    f.write(f"VERIFICADORES: {req.verificadores}\n")
+                if req.estado_verificacion:
+                    f.write(f"ESTADO: {req.estado_verificacion}\n")
                 cuerpo = req.texto.strip() if req.texto else ""
                 f.write(f"\n{cuerpo or req.titulo or 'Sin contenido'}")
 
@@ -210,6 +288,7 @@ def _run_job(job_id: str, req: GenerateRequest):
             jobs[job_id]["status"] = "running"
             jobs[job_id]["log_file"] = str(log_path)
             jobs[job_id]["started_at"] = datetime.now().isoformat()
+            _jobs_persist()
 
         # Fuerza UTF-8 en el subproceso: en Windows, cuando stdout se
         # redirige a un archivo (no a una consola), Python usa por defecto
@@ -309,6 +388,7 @@ def _run_job(job_id: str, req: GenerateRequest):
             jobs[job_id]["youtube_status"] = youtube_status
             jobs[job_id]["youtube_error"]  = youtube_error
             jobs[job_id]["storage_results"] = storage_results
+            _jobs_persist()
 
     except Exception as e:
         import traceback
@@ -318,6 +398,7 @@ def _run_job(job_id: str, req: GenerateRequest):
             jobs[job_id]["logs"] = traceback.format_exc()
             jobs[job_id]["completed_at"] = datetime.now().isoformat()
             jobs[job_id]["log_file"] = None
+            _jobs_persist()
     finally:
         if texto_tmp:
             try:
@@ -330,8 +411,9 @@ def _run_job(job_id: str, req: GenerateRequest):
             pass
 
 
-@app.post("/api/generate")
-def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
+def _create_job(payload: dict) -> str:
+    """Crea y arranca un job de generación. Retorna el job_id. Usable sin HTTP."""
+    req = GenerateRequest(**payload)
     labels = {
         "url": f"URL: {req.url}",
         "texto": f"Artículo: {req.titulo}",
@@ -340,7 +422,6 @@ def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
         "tema": f"Tema: {req.tema}",
     }
     job_id = uuid.uuid4().hex[:8]
-
     with jobs_lock:
         jobs[job_id] = {
             "id": job_id,
@@ -360,9 +441,19 @@ def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
             "started_at": None,
             "completed_at": None,
         }
+        _jobs_persist()
+    threading.Thread(target=_run_job, args=(job_id, req), daemon=True).start()
+    return job_id
 
-    thread = threading.Thread(target=_run_job, args=(job_id, req), daemon=True)
-    thread.start()
+
+# Registrar para que gestor.py pueda crear jobs sin HTTP
+from api.jobs_store import register_create_job  # noqa: E402
+register_create_job(_create_job)
+
+
+@app.post("/api/generate")
+def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
+    job_id = _create_job(req.model_dump())
     return {"job_id": job_id}
 
 
@@ -416,7 +507,7 @@ def output_stats():
 # Sidecars que puede generar un reel, segun el pipeline que lo creo
 # (narrado: audio/caption/fuente/guion — clip/musica: info). Todos comparten
 # el mismo slug base que el .mp4 (ver main.py: _guardar_atribucion, _info.txt).
-_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt")
+_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt", "_thumbnail.jpg")
 _VIDEO_NAME_RE = re.compile(r"^(.+?)(_short\d+)?_(?:music_)?reel\.mp4$")
 
 
@@ -523,8 +614,8 @@ async def news_discover(req: DiscoverRequest):
 
 
 class PreviewTtsRequest(BaseModel):
-    servicio: str = "auto"
-    voz: Optional[str] = None
+    servicio: str = "edge-tts"
+    voz: Optional[str] = "es-ES-AlvaroNeural"
     texto: str = "Hola, esta es una prueba de voz para el reel. ¿Qué te parece cómo suena?"
 
 
