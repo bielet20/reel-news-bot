@@ -8,6 +8,14 @@ interface Recencia {
   muy_reciente: boolean;
 }
 
+interface FuenteDetalle {
+  org: string;
+  fuente: string;
+  url: string;
+  nivel: number;
+  rol: string;
+}
+
 interface NoticiaProuesta {
   titulo: string;
   titulo_original: string;
@@ -21,6 +29,17 @@ interface NoticiaProuesta {
   fecha?: string;
   recencia?: Recencia;
   fuente_verificada?: boolean;
+  confirmada?: boolean;
+  n_fuentes?: number;
+  fuentes_confirmacion?: string[];
+  fuentes_detalle?: FuenteDetalle[];
+  origen?: string;
+  origen_tipo?: string;
+  verificadores?: string[];
+  fact_checkers?: string[];
+  estado_verificacion?: string;
+  documentacion?: string;
+  nivel_fuente?: number;
 }
 
 interface Props {
@@ -61,6 +80,7 @@ const PAISES = [
 
 const CATEGORIAS: Record<string, string> = {
   tecnologia: "💻",
+  ia: "🤖",
   economia: "💰",
   mundo: "🌍",
   politica: "🏛️",
@@ -80,6 +100,65 @@ function recenciaLabel(recencia?: Recencia): { label: string; color: string; bg:
   if (horas < 12) return { icon: "🟠", label: recencia.label, color: "#fbbf24", bg: "#231a00" };
   if (horas < 24) return { icon: "🟡", label: "Hoy",          color: "#a3e635", bg: "#162008" };
   return null;
+}
+
+function etiquetaFuente(n: NoticiaProuesta): string {
+  const origen = n.origen || n.fuente || "";
+  const v = (n.verificadores || []).filter((x) => x && x !== origen);
+  if (v.length) return `${origen} · contrastada por ${v.join(", ")}`;
+  if (n.estado_verificacion === "redaccion_propia") return `${origen} · verificación de redacción`;
+  if (n.estado_verificacion === "fact_check" && (n.fact_checkers || []).length) {
+    return `${origen} · verificada por ${(n.fact_checkers || []).join(", ")}`;
+  }
+  return origen;
+}
+
+function estadoVerificacion(n: NoticiaProuesta): { label: string; color: string } | null {
+  const e = n.estado_verificacion;
+  if (e === "contrastada") return { label: "Contrastada", color: "#4ade80" };
+  if (e === "fact_check") return { label: "Fact-check", color: "#4ade80" };
+  if (e === "redaccion_propia") return { label: "Verificación de redacción", color: "#60a5fa" };
+  if (e === "sin_contrastar") return { label: "Sin contrastar", color: "#fbbf24" };
+  return null;
+}
+
+function ProvenanceBlock({ n }: { n: NoticiaProuesta }) {
+  const estado = estadoVerificacion(n);
+  const detalle = n.fuentes_detalle || [];
+  if (!n.documentacion && !estado && detalle.length === 0) return null;
+  return (
+    <div className="text-xs space-y-1" style={{ color: "var(--muted)" }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        {estado && (
+          <span className="px-1.5 py-0.5 rounded-full font-semibold"
+            style={{ color: estado.color, border: `1px solid ${estado.color}55`, background: `${estado.color}14` }}>
+            {estado.label}
+            {n.n_fuentes && n.n_fuentes > 1 ? ` · ${n.n_fuentes} medios` : ""}
+          </span>
+        )}
+        {n.origen_tipo && (
+          <span>{n.origen_tipo}</span>
+        )}
+      </div>
+      {n.documentacion && <p style={{ color: "var(--text)", opacity: 0.85 }}>{n.documentacion}</p>}
+      {detalle.length > 0 && (
+        <p className="flex flex-wrap gap-x-2 gap-y-0.5">
+          {detalle.map((d) => {
+            const rol = d.rol === "origen" ? "Origen" : d.rol === "fact_check" ? "Fact-check" : "Contraste";
+            const label = `${rol}: ${d.org || d.fuente}`;
+            return d.url ? (
+              <a key={`${d.org}-${d.url}`} href={d.url} target="_blank" rel="noopener noreferrer"
+                style={{ color: "var(--accent)" }}>
+                {label}
+              </a>
+            ) : (
+              <span key={`${d.org}-${rol}`}>{label}</span>
+            );
+          })}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function scoreLabel(score: number): { emoji: string; label: string; color: string; bg: string } {
@@ -180,8 +259,14 @@ export default function DiscoverPanel({ onUsar }: Props) {
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
       ``,
       `📰 FUENTE ORIGINAL`,
-      n.fuente || "Fuente verificada",
+      etiquetaFuente(n) || n.fuente || "Fuente verificada",
+      n.documentacion || "",
+      n.verificadores?.length ? `Contrastada por: ${n.verificadores.join(", ")}` : "",
+      n.fact_checkers?.length ? `Fact-check: ${n.fact_checkers.join(", ")}` : "",
       n.link ? `🔗 ${n.link}` : "",
+      ...(n.fuentes_detalle || []).filter((d) => d.url && d.url !== n.link).map(
+        (d) => `${d.rol === "origen" ? "Origen" : d.rol === "fact_check" ? "Fact-check" : "Contraste"}: ${d.org} — ${d.url}`
+      ),
       ``,
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
       ``,
@@ -267,9 +352,12 @@ export default function DiscoverPanel({ onUsar }: Props) {
       body: JSON.stringify({
         mode: "texto",
         titulo: art.titulo,
-        fuente: art.fuente || "",
+        fuente: etiquetaFuente(art) || art.fuente || "",
         texto: textoLimpio,
         url_fuente: art.link || "",
+        procedencia: art.documentacion || "",
+        verificadores: (art.verificadores || []).join(", "),
+        estado_verificacion: art.estado_verificacion || "",
         tipo_contenido: "noticia",
         mostrar_titulo: true,
         servicio_voz: "auto",
@@ -710,9 +798,10 @@ export default function DiscoverPanel({ onUsar }: Props) {
                             </span>
                           )}
                           <span className="text-xs" style={{ color: "var(--muted)" }}>
-                            {cat} {n.fuente && `· ${n.fuente}`}
+                            {cat} {n.origen || n.fuente ? `· ${etiquetaFuente(n) || n.fuente}` : ""}
                           </span>
                         </div>
+                        <ProvenanceBlock n={n} />
                       </div>
                       {/* Acciones */}
                       <div className="flex items-center gap-2 shrink-0">
@@ -917,10 +1006,10 @@ export default function DiscoverPanel({ onUsar }: Props) {
                       style={{ background: "var(--surface2)", color: "var(--muted)" }}>
                       {cat} {n.categoria}
                     </span>
-                    {n.fuente && (
+                    {(n.origen || n.fuente) && (
                       <span className="text-xs flex items-center gap-1" style={{ color: "var(--muted)" }}>
                         {n.fuente_verificada && <span style={{ color: "#4ade80" }}>✓</span>}
-                        {n.fuente}
+                        {etiquetaFuente(n) || n.fuente}
                       </span>
                     )}
                   </div>
@@ -986,6 +1075,7 @@ export default function DiscoverPanel({ onUsar }: Props) {
                     {n.resumen}
                   </p>
                 )}
+                <ProvenanceBlock n={n} />
               </div>
             );
           })}

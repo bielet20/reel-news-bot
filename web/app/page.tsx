@@ -35,6 +35,13 @@ interface Attribution {
   seccion?: string;
   url_autor?: string;
   caption?: string;
+  origen?: string;
+  origen_tipo?: string;
+  verificadores?: string[];
+  fact_checkers?: string[];
+  estado_verificacion?: string;
+  documentacion?: string;
+  fuentes_detalle?: { org: string; fuente: string; url: string; rol: string }[];
 }
 
 interface JobState {
@@ -79,6 +86,9 @@ export default function Home() {
   const [urlFuente, setUrlFuente] = useState(""); // link original al usar Descubrir → Texto
   const [titulo, setTitulo] = useState("");
   const [fuente, setFuente] = useState("");
+  const [procedencia, setProcedencia] = useState("");
+  const [verificadoresTxt, setVerificadoresTxt] = useState("");
+  const [estadoVerif, setEstadoVerif] = useState("");
   const [texto, setTexto] = useState("");
   const [tema, setTema] = useState("");
   const [artista, setArtista] = useState("");
@@ -158,6 +168,28 @@ export default function Home() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [activeJob?.logs, logsExpanded]);
+
+  // Cargar prefs guardadas al inicio para pre-rellenar música y volúmenes
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/prefs/generation").then((r) => r.json()).catch(() => null),
+      fetch("/api/music").then((r) => r.json()).catch(() => []),
+    ]).then(([prefs, library]) => {
+      if (!prefs) return;
+      const tracks: MusicItem[] = Array.isArray(library) ? library : [];
+      setMusicLibrary(tracks);
+      if (prefs.volumen_musica != null) setVolumenMusica(Math.round(prefs.volumen_musica * 100));
+      if (prefs.volumen_voz != null) setVolumenVoz(Math.round(prefs.volumen_voz * 100));
+      if (prefs.musica_fondo) {
+        const track = tracks.find((t: MusicItem) => t.filename === prefs.musica_fondo);
+        if (track) {
+          setMusicaItem(track);
+          setMusicaEnabled(true);
+        }
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Construye el resumen para el modal de confirmación
   function buildSummary(): SummaryGroup[] {
@@ -276,7 +308,15 @@ export default function Home() {
     const body: Record<string, unknown> = { mode, duracion_maxima: duracion };
 
     if (mode === "url") body.url = url;
-    else if (mode === "texto") { body.titulo = titulo; body.fuente = fuente; body.texto = texto; if (urlFuente) body.url_fuente = urlFuente; }
+    else if (mode === "texto") {
+      body.titulo = titulo;
+      body.fuente = fuente;
+      body.texto = texto;
+      if (urlFuente) body.url_fuente = urlFuente;
+      if (procedencia) body.procedencia = procedencia;
+      if (verificadoresTxt) body.verificadores = verificadoresTxt;
+      if (estadoVerif) body.estado_verificacion = estadoVerif;
+    }
     else if (mode === "youtube") { body.url = url; body.modo_youtube = modoYt; body.cantidad_shorts = cantidad; body.youtube_auto_segmento = ytAutoSegmento; body.cookies_browser = cookiesBrowser; }
     else if (mode === "musica") { body.url = url; body.artista = artista; body.musica_mostrar_nombre = musicaMostrarNombre; body.cookies_browser = cookiesBrowser; }
     else if (mode === "tema") body.tema = tema;
@@ -331,14 +371,28 @@ export default function Home() {
 
   const isRunning = activeJob && (activeJob.status === "pending" || activeJob.status === "running");
 
-  function handleUsarNoticia(noticia: { titulo: string; titulo_original: string; fuente: string; link: string; resumen: string }) {
+  function handleUsarNoticia(noticia: {
+    titulo: string; titulo_original: string; fuente: string; link: string; resumen: string;
+    origen?: string; verificadores?: string[]; documentacion?: string; estado_verificacion?: string;
+    fact_checkers?: string[];
+  }) {
     const textoLimpio = noticia.resumen
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+    const origen = noticia.origen || noticia.fuente || "";
+    const v = (noticia.verificadores || []).filter((x) => x && x !== origen);
+    const fuenteLabel = v.length
+      ? `${origen} · contrastada por ${v.join(", ")}`
+      : noticia.estado_verificacion === "redaccion_propia"
+        ? `${origen} · verificación de redacción`
+        : origen;
     setMode("texto");
     setTitulo(noticia.titulo);
-    setFuente(noticia.fuente || "");
+    setFuente(fuenteLabel);
+    setProcedencia(noticia.documentacion || "");
+    setVerificadoresTxt((noticia.verificadores || []).join(", "));
+    setEstadoVerif(noticia.estado_verificacion || "");
     setTexto(textoLimpio || noticia.titulo_original);
     setUrlFuente(noticia.link || "");
     setError("");
@@ -1072,7 +1126,11 @@ function AttributionPanel({ attribution }: { attribution: Attribution }) {
   const [tipo, setTipo] = useState<"noticia" | "curiosidad">("noticia");
 
   const campos = [
-    attribution.fuente            && { icon: "📰", label: "Fuente",   value: attribution.fuente },
+    (attribution.origen || attribution.fuente) && { icon: "📰", label: "Fuente",   value: attribution.origen || attribution.fuente || "" },
+    attribution.origen_tipo       && { icon: "🏷️", label: "Tipo",     value: attribution.origen_tipo },
+    attribution.documentacion     && { icon: "✅", label: "Procedencia", value: attribution.documentacion },
+    (attribution.verificadores || []).length > 0 && { icon: "🔎", label: "Contrastada por", value: (attribution.verificadores || []).join(", ") },
+    (attribution.fact_checkers || []).length > 0 && { icon: "🛡️", label: "Fact-check", value: (attribution.fact_checkers || []).join(", ") },
     attribution.autor             && { icon: "✍️",  label: "Autor",    value: attribution.autor },
     attribution.fecha_publicacion && { icon: "📅", label: "Fecha",    value: attribution.fecha_publicacion.slice(0, 10) },
     attribution.seccion           && { icon: "📂", label: "Sección",  value: attribution.seccion },
@@ -1098,6 +1156,9 @@ function AttributionPanel({ attribution }: { attribution: Attribution }) {
       "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
       "📰 FUENTE ORIGINAL",
       fuente   ? `Medio:     ${fuente}`   : "",
+      attribution.documentacion ? attribution.documentacion : "",
+      (attribution.verificadores || []).length ? `Contrastada por: ${(attribution.verificadores || []).join(", ")}` : "",
+      (attribution.fact_checkers || []).length ? `Fact-check: ${(attribution.fact_checkers || []).join(", ")}` : "",
       autor    ? `Autor:     ${autor}`    : "",
       fecha    ? `Publicado: ${fecha}`    : "",
       seccion  ? `Sección:   ${seccion}`  : "",

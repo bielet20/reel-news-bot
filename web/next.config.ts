@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   // dev (_next/*, webpack-hmr) si el host no es "localhost". Abrir la app en
   // http://127.0.0.1:3000 dejaba la página sin hidratar (renderiza pero los
   // clics no hacen nada). Permitimos también 127.0.0.1 y la IP de la LAN.
-  allowedDevOrigins: ["127.0.0.1"],
+  allowedDevOrigins: ["127.0.0.1", "192.168.1.*"],
   async rewrites() {
     return [
       { source: "/api/:path*",           destination: `${backend}/api/:path*` },
