@@ -39,7 +39,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 libxext6 libxrender1 \
-    libgomp1 && \
+    libgomp1 \
+    # Dependencias de sistema para Chromium headless (Playwright antibot fallback)
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
+    libx11-xcb1 libxcb-dri3-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 LTS — necesario para que yt-dlp resuelva el n-challenge de YouTube.
+# yt-dlp requiere Node >= 22.0.0 (MIN_SUPPORTED_VERSION).
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
@@ -50,19 +61,10 @@ WORKDIR /app
 # Dependencias principales del proyecto
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.txt
+    pip3 install --no-cache-dir -r requirements.txt && \
+    # Instala Chromium para Playwright (antibot fallback en article_extractor)
+    python3 -m playwright install chromium
 
-# Venv de SadTalker con PyTorch CUDA en /opt/sadtalker_venv
-# (separado de /app para que el bind-mount de código no lo tape)
-COPY vendor/sadtalker/requirements.txt /tmp/st_requirements.txt
-RUN python3.10 -m venv /opt/sadtalker_venv && \
-    /opt/sadtalker_venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /opt/sadtalker_venv/bin/pip install --no-cache-dir \
-        torch torchvision torchaudio \
-        --index-url https://download.pytorch.org/whl/cu128 && \
-    /opt/sadtalker_venv/bin/pip install --no-cache-dir \
-        -r /tmp/st_requirements.txt && \
-    /opt/sadtalker_venv/bin/pip install --no-cache-dir huggingface_hub
 
 EXPOSE 8000
 

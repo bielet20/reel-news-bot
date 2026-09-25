@@ -90,17 +90,22 @@ def descargar_video(url: str, carpeta_tmp: str = None,
 
     browser = cookies_browser or "chrome"
 
+    # Cookies file exportado del navegador (Netscape format).
+    # Tiene prioridad sobre --cookies-from-browser porque funciona dentro de Docker.
+    cookies_file = os.environ.get("YT_COOKIES_FILE", "")
+    if cookies_file and not os.path.isfile(cookies_file):
+        print(f"   [WARN] YT_COOKIES_FILE apunta a un archivo que no existe: {cookies_file}")
+        cookies_file = ""
+
     base_cmd = [
         yt_dlp_bin,
         "--format", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "--merge-output-format", "mp4",
         "--no-playlist",
         "--retries", "2",
-        # El cliente "android_vr" (que yt-dlp mete por defecto en la rotacion
-        # de clientes) esta devolviendo 403 Forbidden en YouTube desde hace
-        # dias mientras el resto (visionos, web, ios...) funcionan bien.
-        # Se excluye explicitamente para no depender de la suerte del sorteo.
-        "--extractor-args", "youtube:player_client=default,-android_vr",
+        # android_vr → 403; visionos → requiere cookies; ios/web → SABR experiment.
+        # web_creator y tv_embedded evitan SABR y funcionan bien con cookies de sesión.
+        "--extractor-args", "youtube:player_client=web_creator,tv_embedded,mweb,-android_vr,-visionos,-ios",
     ]
 
     def _intentar(cmd: list, salida_base: str):
@@ -120,13 +125,18 @@ def descargar_video(url: str, carpeta_tmp: str = None,
         salida_base = os.path.join(carpeta_tmp, f"_ytsrc_{ts}")
         salida_tmpl = salida_base + ".%(ext)s"
 
+        # 1. Cookies file (funciona en Docker, tiene prioridad)
+        if cookies_file:
+            ruta, _ = _intentar(base_cmd + ["--cookies", cookies_file, "-o", salida_tmpl, url], salida_base)
+            if ruta:
+                return ruta
+
+        # 2. Cookies del navegador del host (solo en local, falla en Docker)
         ruta, _ = _intentar(base_cmd + ["--cookies-from-browser", browser, "-o", salida_tmpl, url], salida_base)
         if ruta:
             return ruta
 
-        # Si el fallo es al extraer las cookies del navegador (perfil bloqueado,
-        # base de datos cifrada de forma distinta en este equipo, etc.) la
-        # mayoria de videos publicos igual se pueden descargar sin cookies.
+        # 3. Sin cookies (vídeos públicos que no requieran autenticación)
         ruta, stderr = _intentar(base_cmd + ["-o", salida_tmpl, url], salida_base)
         if ruta:
             return ruta
