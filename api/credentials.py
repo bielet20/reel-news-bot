@@ -25,6 +25,8 @@ FIELDS: dict[str, list[dict]] = {
     "tiktok": [
         {"key": "client_key",    "label": "Client Key",    "secret": False},
         {"key": "client_secret", "label": "Client Secret", "secret": True},
+        {"key": "service_url",     "label": "URL del servicio (api.bieninforma2.site)", "secret": False},
+        {"key": "service_api_key", "label": "API Key del servicio (PUBLISH_API_KEY)",   "secret": True},
     ],
     "instagram": [
         {"key": "app_id",        "label": "App ID",        "secret": False},
@@ -55,7 +57,8 @@ _TOKEN_PLATFORMS = {"telegram", "x", "facebook", "whatsapp_canal"}
 # Mapa de campos a variables de entorno para inyección en startup
 ENV_MAP: dict[str, dict[str, str]] = {
     "youtube":   {"client_id": "YOUTUBE_CLIENT_ID", "client_secret": "YOUTUBE_CLIENT_SECRET"},
-    "tiktok":    {"client_key": "TIKTOK_CLIENT_KEY", "client_secret": "TIKTOK_CLIENT_SECRET"},
+    "tiktok":    {"client_key": "TIKTOK_CLIENT_KEY", "client_secret": "TIKTOK_CLIENT_SECRET",
+                  "service_url": "TIKTOK_API_URL", "service_api_key": "TIKTOK_API_KEY"},
     "instagram": {"app_id": "INSTAGRAM_APP_ID", "app_secret": "INSTAGRAM_APP_SECRET"},
 }
 

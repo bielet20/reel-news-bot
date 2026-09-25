@@ -68,6 +68,7 @@ from api.prefs import router as prefs_router
 from api.scanner import router as scanner_router
 from api.yt_scanner import router as yt_scanner_router
 from api.autopublisher import router as autopublisher_router
+from api.tiktok_post import router as tiktok_post_router
 from api.distribucion import router as distribucion_router
 app.include_router(admin_router)
 app.include_router(credentials_router)
@@ -86,6 +87,7 @@ app.include_router(music_clip_router)
 app.include_router(article_index_router)
 app.include_router(storage_router)
 app.include_router(autopublisher_router)
+app.include_router(tiktok_post_router)
 app.include_router(distribucion_router)
 
 app.add_middleware(
