@@ -9,8 +9,13 @@ Flujo:
   4. POST /{ig_user_id}/media_publish → media_id
   5. GET  /{media_id}           → permalink
 
-Credenciales: token OAuth guardado en _tokens/instagram.json via /canales.
+Credenciales (en orden):
+  1. _tokens/instagram.json (conexión OAuth desde /canales).
+  2. El token de PÁGINA de Facebook (FB_PAGE_ID + FB_PAGE_ACCESS_TOKEN, ver
+     facebook_uploader): la cuenta profesional de Instagram vinculada a esa
+     página se publica con ese mismo token, que no caduca.
 """
+import os
 import time
 import requests
 from pathlib import Path
@@ -18,7 +23,7 @@ from datetime import datetime, timedelta
 
 from accounts_manager import load_token, save_token
 
-GRAPH_API  = "https://graph.facebook.com/v22.0"
+GRAPH_API  = f"https://graph.facebook.com/{os.environ.get('FB_GRAPH_VERSION', 'v23.0')}"
 CHUNK_SIZE = 10 * 1024 * 1024   # 10 MB por chunk
 POLL_MAX   = 40                  # ~4 minutos máximo
 POLL_BASE  = 4                   # segundos base (duplica cada intento fallido)
@@ -26,10 +31,34 @@ POLL_BASE  = 4                   # segundos base (duplica cada intento fallido)
 
 # ── Token ─────────────────────────────────────────────────────────────────────
 
+def _token_desde_pagina() -> dict | None:
+    """Cuenta de Instagram vinculada a la página de Facebook, con el token de la página."""
+    try:
+        from facebook_uploader import _get_credentials
+        page_id, page_token = _get_credentials()
+    except Exception:
+        return None
+    resp = requests.get(
+        f"{GRAPH_API}/{page_id}",
+        params={"fields": "instagram_business_account{id,username}", "access_token": page_token},
+        timeout=20,
+    )
+    ig = resp.json().get("instagram_business_account") if resp.ok else None
+    if not ig or not ig.get("id"):
+        return None
+    return {"access_token": page_token, "ig_user_id": ig["id"], "username": ig.get("username", "")}
+
+
 def _get_token() -> dict:
     token = load_token("instagram")
     if not token:
-        raise RuntimeError("Instagram no conectado. Ve a Canales para vincular tu cuenta.")
+        token = _token_desde_pagina()
+        if token:
+            return token
+        raise RuntimeError(
+            "Instagram no conectado. Vincula la cuenta profesional de Instagram a la "
+            "página de Facebook (o conéctala en Canales)."
+        )
     expires_at = token.get("expires_at")
     if expires_at:
         try:
@@ -216,6 +245,9 @@ def subir_video(video_path: str, caption: str = "") -> dict:
 def verificar_credenciales() -> dict:
     token = load_token("instagram")
     if not token:
+        token = _token_desde_pagina()
+        if token:
+            return {"ok": True, "username": token.get("username") or "usuario", "via": "página de Facebook"}
         return {"ok": False, "motivo": "No conectado"}
     expires_at = token.get("expires_at")
     if expires_at:

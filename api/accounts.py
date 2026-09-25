@@ -121,10 +121,21 @@ def accounts_status():
         wa_canal_jid = os.environ.get("WA_CHANNEL_JID", "")
         wa_canal = {"connected": bool(wa_canal_jid), "channel_jid": wa_canal_jid}
 
+    # Instagram: token OAuth propio o la cuenta vinculada a la página de Facebook
+    instagram = get_account_info("instagram")
+    if not instagram.get("connected") and facebook.get("connected"):
+        try:
+            from instagram_uploader import verificar_credenciales as ig_verify
+            ig = ig_verify()
+            if ig.get("ok"):
+                instagram = {"connected": True, "username": ig.get("username", "usuario")}
+        except Exception:
+            pass
+
     return {
         "youtube":        youtube,
         "tiktok":         tiktok,
-        "instagram":      get_account_info("instagram"),
+        "instagram":      instagram,
         "telegram":       get_account_info("telegram"),
         "whatsapp":       whatsapp,
         "x":              x_status,
