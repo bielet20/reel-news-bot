@@ -509,7 +509,7 @@ def output_stats():
 # Sidecars que puede generar un reel, segun el pipeline que lo creo
 # (narrado: audio/caption/fuente/guion — clip/musica: info). Todos comparten
 # el mismo slug base que el .mp4 (ver main.py: _guardar_atribucion, _info.txt).
-_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt", "_thumbnail.jpg")
+_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt", "_thumbnail.jpg", "_cover.jpg", "_miniatura.json")
 _VIDEO_NAME_RE = re.compile(r"^(.+?)(_short\d+)?_(?:music_)?reel\.mp4$")
 
 
@@ -527,6 +527,39 @@ def get_video(filename: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
     return FileResponse(str(file_path), media_type="video/mp4")
+
+
+_miniaturas_jobs: dict[str, dict] = {}
+
+
+@app.post("/api/output/{filename}/miniaturas")
+def regenerar_miniaturas(filename: str):
+    """(Re)genera la portada vertical y la miniatura de YouTube de un reel ya
+    hecho, en segundo plano (Flux tarda unos minutos). Estado en el GET."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nombre de archivo invalido")
+    if not (OUTPUT_DIR / filename).exists():
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+    if _miniaturas_jobs.get(filename, {}).get("estado") == "generando":
+        return _miniaturas_jobs[filename]
+
+    def _job():
+        try:
+            from thumbnail_maker import generar_para_reel
+            r = generar_para_reel(filename, str(OUTPUT_DIR))
+            _miniaturas_jobs[filename] = {"estado": "ok", **{k: Path(v).name if k in ("cover", "thumbnail") else v
+                                                              for k, v in r.items()}}
+        except Exception as e:
+            _miniaturas_jobs[filename] = {"estado": "error", "error": str(e)}
+
+    _miniaturas_jobs[filename] = {"estado": "generando"}
+    threading.Thread(target=_job, daemon=True).start()
+    return _miniaturas_jobs[filename]
+
+
+@app.get("/api/output/{filename}/miniaturas")
+def estado_miniaturas(filename: str):
+    return _miniaturas_jobs.get(filename, {"estado": "sin_job"})
 
 
 @app.delete("/api/output/{filename}")

@@ -441,7 +441,7 @@ def _output_files_for(output_file: str) -> list[Path]:
     if not slug or slug == output_file:
         return []
     suffixes = ["_reel.mp4", "_audio.mp3", "_guion.txt", "_fuente.json",
-                "_caption.txt", "_thumbnail.jpg", "_info.txt"]
+                "_caption.txt", "_thumbnail.jpg", "_cover.jpg", "_miniatura.json", "_info.txt"]
     paths = []
     for s in suffixes:
         p = OUTPUT_DIR / f"{slug}{s}"
@@ -719,7 +719,7 @@ def storage_cleanup(req: CleanupRequest):
             # Calcular slug del archivo
             name = f.name
             for s in ["_reel.mp4", "_audio.mp3", "_guion.txt", "_fuente.json",
-                      "_caption.txt", "_thumbnail.jpg", "_info.txt"]:
+                      "_caption.txt", "_thumbnail.jpg", "_cover.jpg", "_miniatura.json", "_info.txt"]:
                 if name.endswith(s):
                     slug = name[: -len(s)]
                     if slug not in known_slugs:

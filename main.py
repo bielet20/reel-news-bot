@@ -216,8 +216,9 @@ def _titulo_es_desde_guion(guion_texto: str, max_chars: int = 90) -> str:
         return ""
     # Saltar marcadores de acto en videos largos
     texto = re.sub(r"^\[ACTO\s+\d+[^\]]*\]\s*", "", guion_texto.strip(), flags=re.IGNORECASE)
-    # Primera oración (hasta .  ?  !)
-    m = re.match(r"^([^.!?]{15,}?[.!?])", texto.strip())
+    # Primera oración (hasta . ? ! seguidos de espacio o final: así "4.500" o
+    # "3.5" no cortan la frase, que antes dejaba títulos como "Una tarea que costaba 4.")
+    m = re.match(r"^(.{15,}?[.!?])(?=\s|$)", texto.strip(), re.S)
     if m:
         titulo = m.group(1).strip()
         if len(titulo) <= max_chars:
@@ -475,16 +476,22 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                     texto_personalizado=texto_personalizado)
     print(f"   Video generado: {ruta_video}")
 
-    # Generar miniatura para YouTube
-    hook_miniatura = titulo_es
+    # Portada vertical (_cover.jpg) + miniatura de YouTube (_thumbnail.jpg),
+    # todo en local: LM Studio para el texto y Flux (ComfyUI) para la imagen.
     url_art_thumb = noticia.get("link") if not (noticia.get("link") or "").startswith("/") else None
-    ruta_thumb = generar_miniatura(
-        slug, hook_miniatura, carpeta_salida,
-        url_articulo=url_art_thumb,
-        titulo=titulo_es,
-    )
-    if ruta_thumb:
-        print(f"   Miniatura generada: {ruta_thumb}")
+    try:
+        from thumbnail_maker import generar_miniaturas
+        mini = generar_miniaturas(
+            slug, carpeta_salida, titulo_es, guion.get("guion", ""),
+            imagenes=imgs_fondo or [], url_articulo=url_art_thumb,
+        )
+        print(f"   Miniaturas generadas ({mini['fondo']}): {mini['cover']} · {mini['thumbnail']}")
+    except Exception as e:
+        print(f"   [WARN] Miniaturas nuevas fallaron ({e}); uso la miniatura simple")
+        ruta_thumb = generar_miniatura(slug, titulo_es, carpeta_salida,
+                                       url_articulo=url_art_thumb, titulo=titulo_es)
+        if ruta_thumb:
+            print(f"   Miniatura generada: {ruta_thumb}")
 
     # Guardar atribución de la fuente original
     _guardar_atribucion(slug, carpeta_salida, noticia, atribucion)
