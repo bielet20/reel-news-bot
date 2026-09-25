@@ -8,6 +8,8 @@ Apuntamos a 120-135 palabras de guion.
 """
 
 import os
+
+from llm_local import nube_permitida
 import re
 
 STOPWORDS_ES = set("""
@@ -277,7 +279,7 @@ def _llamar_ollama(prompt: str, model: str = "llama3.2") -> str:
     """Llama a un modelo local via Ollama. Sin API, sin coste, sin internet."""
     import json
     import urllib.request
-    url = "http://localhost:11434/api/generate"
+    url = os.environ.get("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/") + "/api/generate"
     body = json.dumps({
         "model": model,
         "prompt": prompt,
@@ -295,20 +297,10 @@ def _llamar_lmstudio(prompt: str, model: str) -> str:
     """Llama a un modelo cargado en LM Studio via su API compatible con OpenAI.
     Sin API, sin coste, sin internet. Requiere el servidor local de LM Studio
     corriendo (Developer > Start Server, o `lms server start`)."""
-    import json
-    import urllib.request
-    url = "http://localhost:1234/v1/chat/completions"
-    body = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
-        "max_tokens": 900,
-    }).encode()
-    req = urllib.request.Request(url, data=body,
-                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read())
-    return data["choices"][0]["message"]["content"].strip()
+    # llm_local usa LLM_BASE_URL (host.docker.internal desde Docker): con
+    # "localhost" el contenedor no llegaba a LM Studio y todo acababa en Claude.
+    from llm_local import completar
+    return completar(prompt, max_tokens=2500)
 
 
 def _llamar_gemini(prompt: str, api_key: str) -> str:
@@ -317,14 +309,15 @@ def _llamar_gemini(prompt: str, api_key: str) -> str:
     import urllib.request
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.0-flash:generateContent?key={api_key}"
+        f"{os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')}:generateContent"
     )
     body = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": 600, "temperature": 0.7},
     }).encode()
     req = urllib.request.Request(url, data=body,
-                                  headers={"Content-Type": "application/json"})
+                                  headers={"Content-Type": "application/json",
+                                           "x-goog-api-key": api_key})
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.loads(resp.read())
     return data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -360,7 +353,7 @@ def _llamar_claude(prompt: str, api_key: str) -> str:
         max_tokens=600,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text.strip()
+    return ("".join(b.text for b in response.content if getattr(b, "type", "") == "text")).strip()
 
 
 def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = "",
@@ -442,7 +435,7 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
         print(f"[WARN] LM Studio no disponible: {e}")
 
     # --- Intentar Claude ---
-    claude_key = os.environ.get("ANTHROPIC_API_KEY")
+    claude_key = os.environ.get("ANTHROPIC_API_KEY") if nube_permitida() else None
     if claude_key:
         try:
             import anthropic  # noqa: F401
@@ -461,7 +454,7 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
             print(f"[WARN] Claude API: {e}")
 
     # --- Intentar Gemini (gratis) ---
-    gemini_key = os.environ.get("GEMINI_API_KEY")
+    gemini_key = os.environ.get("GEMINI_API_KEY") if nube_permitida() else None
     if gemini_key:
         try:
             print("   -> Usando Gemini 2.0 Flash (gratuito)...")
@@ -477,7 +470,7 @@ def generar_guion_reel_claude(titulo: str, texto_completo: str, fuente: str = ""
             print(f"[WARN] Gemini API: {e}")
 
     # --- Intentar Groq (gratis) ---
-    groq_key = os.environ.get("GROQ_API_KEY")
+    groq_key = os.environ.get("GROQ_API_KEY") if nube_permitida() else None
     if groq_key:
         try:
             print("   -> Usando Groq Llama 3.3 70B (gratuito)...")
@@ -660,8 +653,18 @@ def generar_guion_largo(titulo: str, texto_completo: str, fuente: str = "",
             "tipo": "largo",
         }
 
-    # 1. Claude (mejor calidad para contenido largo)
-    claude_key = os.environ.get("ANTHROPIC_API_KEY")
+    # 0. LM Studio local (sin coste)
+    try:
+        from llm_local import completar
+        print("   -> Guion largo con LM Studio (local)...")
+        return _parse_guion(completar(prompt, max_tokens=6000))
+    except ValueError:
+        raise
+    except Exception as e:
+        print(f"   [WARN] LM Studio largo: {e}")
+
+    # 1. Claude (solo con IA_NUBE=1)
+    claude_key = os.environ.get("ANTHROPIC_API_KEY") if nube_permitida() else None
     if claude_key:
         try:
             import anthropic
@@ -673,17 +676,19 @@ def generar_guion_largo(titulo: str, texto_completo: str, fuente: str = "",
                 max_tokens=3000,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return _parse_guion(resp.content[0].text.strip())
+            return _parse_guion(("".join(b.text for b in resp.content if getattr(b, "type", "") == "text")).strip())
         except Exception as e:
             print(f"   [WARN] Claude largo: {e}")
 
     # 2. Gemini fallback
-    gemini_key = os.environ.get("GEMINI_API_KEY")
+    gemini_key = os.environ.get("GEMINI_API_KEY") if nube_permitida() else None
     if gemini_key:
         try:
             import requests as _req
             r = _req.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')}:generateContent",
+                headers={"x-goog-api-key": gemini_key},
                 json={"contents": [{"parts": [{"text": prompt}]}],
                       "generationConfig": {"maxOutputTokens": 3000}},
                 timeout=60,
@@ -694,7 +699,7 @@ def generar_guion_largo(titulo: str, texto_completo: str, fuente: str = "",
             print(f"   [WARN] Gemini largo: {e}")
 
     # 3. Groq fallback
-    groq_key = os.environ.get("GROQ_API_KEY")
+    groq_key = os.environ.get("GROQ_API_KEY") if nube_permitida() else None
     if groq_key:
         try:
             import requests as _req

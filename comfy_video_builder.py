@@ -339,7 +339,8 @@ def count_lines_per_section(lyrics: str) -> list[int]:
 
 
 def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000,
-                    temperature: float = 0.8, json_mode: bool = False) -> str:
+                    temperature: float = 0.8, json_mode: bool = False,
+                    solo_local: bool = False) -> str:
     """Escalera de LLM para planificar escenas. A diferencia de los helpers de
     summarizer.py (max_tokens=600, pensados para un guion corto) aquí hace falta
     espacio para un JSON con una escena por sección."""
@@ -356,8 +357,8 @@ def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000
                 {"role": "user", "content": user_prompt},
             ],
         }
-        if json_mode:
-            cuerpo["response_format"] = {"type": "json_object"}
+        # LM Studio solo acepta response_format "json_schema" o "text": con
+        # "json_object" responde 400. El prompt ya pide JSON y _json_lenient lo limpia.
         r = requests.post(
             f"{LLM_BASE_URL}/chat/completions",
             json=cuerpo,
@@ -371,6 +372,11 @@ def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000
     except Exception as e:  # noqa: BLE001
         errores.append(f"LM Studio: {e}")
 
+    from llm_local import nube_permitida
+    if solo_local or not nube_permitida():
+        raise RuntimeError(f"LLM local no disponible ({'; '.join(errores)}); "
+                           "la IA en la nube está desactivada (IA_NUBE=1 para permitirla)")
+
     # 2) Claude (ANTHROPIC_API_KEY)
     claude_key = os.environ.get("ANTHROPIC_API_KEY")
     if claude_key:
@@ -383,7 +389,11 @@ def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
-            return resp.content[0].text
+            # Los modelos con razonamiento devuelven bloques "thinking" antes del texto
+            texto = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+            if texto.strip():
+                return texto
+            errores.append("Claude: respuesta sin texto")
         except Exception as e:  # noqa: BLE001
             errores.append(f"Claude: {e}")
 
@@ -391,9 +401,11 @@ def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000
     gemini_key = os.environ.get("GEMINI_API_KEY")
     if gemini_key:
         try:
+            # La clave va en cabecera: en la URL acababa impresa en los errores.
+            modelo = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
             r = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-2.0-flash:generateContent?key={gemini_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent",
+                headers={"x-goog-api-key": gemini_key},
                 json={
                     "contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}],
                     "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.8},

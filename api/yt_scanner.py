@@ -313,9 +313,8 @@ def _fmt_views(n: int) -> str:
 def _adaptar_titulos_es(videos: list[dict]) -> list[dict]:
     """Traduce y adapta los títulos de YouTube al español viral (MrBeast) en un solo batch."""
     import os, json as _json
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return videos
+    from llm_local import completar, nube_permitida
+    api_key = os.environ.get("ANTHROPIC_API_KEY") if nube_permitida() else None
 
     lista = "\n".join(
         f'{i+1}. TÍTULO: {v["titulo"]} | CANAL: {v["canal"]} | VISTAS: {v["views_fmt"]}'
@@ -336,19 +335,24 @@ def _adaptar_titulos_es(videos: list[dict]) -> list[dict]:
     )
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=800,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = resp.content[0].text.strip()
+        if api_key:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=800,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = ("".join(b.text for b in resp.content if getattr(b, "type", "") == "text")).strip()
+        else:
+            raw = completar(prompt, max_tokens=1500, temperature=0.5)
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        data = _json.loads(raw)
+        # el modelo local a veces añade texto alrededor del JSON
+        ini, fin = raw.find("{"), raw.rfind("}")
+        data = _json.loads(raw[ini:fin + 1] if ini != -1 and fin > ini else raw)
         titulos_es = data.get("titulos", [])
         for i, v in enumerate(videos):
             if i < len(titulos_es) and titulos_es[i].strip():

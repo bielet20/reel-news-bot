@@ -69,11 +69,14 @@ def _recopilar(tema, pais, variado, n):
 
 def _curar_con_ia(noticias, n, tema=None):
     """Evalúa noticias con Claude y devuelve las top-n rankeadas."""
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    except ImportError:
-        return [_fallback_item(noticias[i], i) for i in range(min(n, len(noticias)))]
+    from llm_local import completar, nube_permitida
+    client = None
+    if nube_permitida() and os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        except ImportError:
+            client = None
 
     lista_txt = "\n\n".join(
         f"{i+1}. TÍTULO: {item['titulo']}\n"
@@ -141,18 +144,23 @@ Devuelve SOLO este JSON (sin texto adicional, sin markdown):
 Ordena por score descendente."""
 
     try:
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = resp.content[0].text.strip()
+        if client is not None:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = ("".join(b.text for b in resp.content if getattr(b, "type", "") == "text")).strip()
+        else:
+            raw = completar(prompt, max_tokens=3000, temperature=0.4)
         # Strip markdown code blocks if present
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        data = json.loads(raw)
+        # el modelo local a veces añade texto alrededor del JSON
+        ini, fin = raw.find("{"), raw.rfind("}")
+        data = json.loads(raw[ini:fin + 1] if ini != -1 and fin > ini else raw)
         seleccionadas = data.get("seleccionadas", [])
 
         resultado = []
