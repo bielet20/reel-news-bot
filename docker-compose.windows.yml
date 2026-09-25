@@ -1,0 +1,13 @@
+# docker-compose.windows.yml
+# Override para Windows con Docker Desktop.
+# Docker Desktop ya resuelve host.docker.internal automaticamente,
+# el extra_hosts de Linux no es necesario y puede dar conflicto.
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d --build
+#
+# O usa directamente el script install_windows.ps1 que lo hace todo.
+
+services:
+  backend:
+    extra_hosts: !reset []      # elimina el extra_hosts host-gateway de Linux
