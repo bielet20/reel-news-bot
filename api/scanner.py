@@ -39,6 +39,10 @@ CONFIG_DEFAULTS = {
     "publish_platforms": ["youtube"],
     "pais":              "ES",
     "n_noticias":        5,
+    # Reglas para generar/publicar SOLA una noticia (además de score_min):
+    "fiabilidad_min":    70,     # índice de fiabilidad 0-100 (fiabilidad.py)
+    "min_medios":        2,      # medios independientes que la publican
+    "excluir_nivel4":    True,   # nunca si el origen es alerta/PR
 }
 
 STATE_DEFAULTS = {
@@ -90,6 +94,9 @@ class ScannerConfig(BaseModel):
     publish_platforms: list[str]   = ["youtube"]
     pais:              str         = "ES"
     n_noticias:        int         = 5
+    fiabilidad_min:    int         = 70
+    min_medios:        int         = 2
+    excluir_nivel4:    bool        = True
 
 
 # ── API endpoints ──────────────────────────────────────────────────────────────
@@ -187,6 +194,14 @@ def _scan_once():
             seen = set(state.get("seen_links") or [])
             notifs = _load_notifs()
 
+        # Fiabilidad + reglas automáticas para cada noticia analizada
+        from fiabilidad import apta_auto
+        for n in noticias:
+            n["apta_auto"], n["motivos_no_apta"] = apta_auto(n, config)
+        _guardar_analisis(noticias, config)
+
+        # Avisos: las virales nuevas. Se generan/publican SOLAS solo las que
+        # además cumplen fiabilidad, medios y origen (apta_auto)
         nuevas = [
             n for n in noticias
             if float(n.get("score", 0)) >= config["score_min"]
@@ -197,7 +212,7 @@ def _scan_once():
             link = noticia.get("link", "")
             item_id = None
 
-            if config["auto_generate"]:
+            if config["auto_generate"] and noticia.get("apta_auto"):
                 item_id = _enqueue_noticia(noticia, config)
 
             notif = {
@@ -214,7 +229,12 @@ def _scan_once():
                 "item_id": item_id,
                 "leido":   False,
                 "creado":  datetime.now().isoformat(),
-                "auto_generado": config["auto_generate"],
+                "auto_generado": bool(item_id),
+                "fiabilidad": noticia.get("fiabilidad"),
+                "fiabilidad_label": noticia.get("fiabilidad_label"),
+                "n_medios": noticia.get("n_medios"),
+                "apta_auto": noticia.get("apta_auto"),
+                "motivos_no_apta": noticia.get("motivos_no_apta") or [],
             }
             notifs.insert(0, notif)
             seen.add(link)
@@ -248,6 +268,22 @@ def _scan_once():
             _save_json(STATE_FILE, state)
 
     return found
+
+
+ANALISIS_FILE = Path(__file__).parent.parent / "_config" / "ultimo_analisis.json"
+
+
+def _guardar_analisis(noticias: list, config: dict) -> None:
+    """Último análisis completo (viralidad + fiabilidad + expansión) para la
+    página de Fuentes, incluidas las que no pasan las reglas."""
+    try:
+        ANALISIS_FILE.write_text(json.dumps({
+            "fecha": datetime.now().isoformat(timespec="seconds"),
+            "reglas": {k: config.get(k) for k in ("score_min", "fiabilidad_min", "min_medios", "excluir_nivel4")},
+            "noticias": noticias,
+        }, ensure_ascii=False, default=str), encoding="utf-8")
+    except Exception as e:
+        print(f"[scanner] no se pudo guardar el análisis: {e}")
 
 
 def _enqueue_noticia(noticia: dict, config: dict) -> Optional[str]:
@@ -312,9 +348,27 @@ def _scanner_loop():
 
             if not state.get("running"):
                 _scan_once()
+            else:
+                # Otro escaneo en curso: esperar (antes volvía a mirar sin pausa,
+                # en un bucle continuo leyendo el fichero de estado)
+                time.sleep(60)
 
         except Exception:
             time.sleep(60)
 
 
+def _limpiar_running_huerfano():
+    """Al arrancar no hay ningún escaneo en marcha: si el backend se reinició
+    a mitad de uno, "running" se quedaba en True y el escáner no volvía a
+    ejecutarse nunca (pasó del 20 al 26-09-2026)."""
+    with _lock:
+        state = _load_json(STATE_FILE, STATE_DEFAULTS)
+        if state.get("running"):
+            state["running"] = False
+            state["next_run"] = None
+            _save_json(STATE_FILE, state)
+            print("[scanner] estado 'running' huérfano limpiado al arrancar")
+
+
+_limpiar_running_huerfano()
 threading.Thread(target=_scanner_loop, daemon=True, name="viral-scanner").start()

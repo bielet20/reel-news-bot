@@ -20,7 +20,26 @@ def buscar_y_curar(tema=None, pais="ES", variado=True, n_buscar=30, n_retornar=8
     candidatos = _recopilar(tema, pais, variado, n_buscar)
     if not candidatos:
         return []
-    return _curar_con_ia(candidatos, n_retornar, tema)
+    resultado = _curar_con_ia(candidatos, n_retornar, tema)
+    # Cobertura real: quién más publica cada candidata (Google News, medios
+    # fiables) y fiabilidad recalculada con esas confirmaciones
+    try:
+        from fiabilidad import verificar_cobertura
+        for it in resultado:
+            if float(it.get("score", 0) or 0) >= 6:
+                verificar_cobertura(it)
+                it.update(_calcular_veracidad(it))
+    except Exception as e:
+        print(f"[curator] cobertura: {e}")
+    # Expansión: cuántos medios publican cada historia en este momento
+    try:
+        from fiabilidad import expansion, registrar_expansion
+        registrar_expansion(resultado)
+        for it in resultado:
+            it.update(expansion(it))
+    except Exception as e:
+        print(f"[curator] expansión: {e}")
+    return resultado
 
 
 def _recopilar(tema, pais, variado, n):
@@ -236,6 +255,9 @@ def _fallback_item(noticia, pos):
         "link": _resolver_url(noticia.get("link", "")),
         "resumen": noticia.get("resumen", ""),
         "score": round(max(4.0, min(10.0, score)), 1),
+        # Sin LLM la viralidad es una estimación por posición: no vale para
+        # publicar sola (fiabilidad.apta_auto la rechaza)
+        "viralidad_estimada": True,
         "categoria": "general",
         "gancho": "",
         "audiencia": "",
@@ -247,47 +269,17 @@ def _fallback_item(noticia, pos):
 
 
 def _calcular_veracidad(item: dict) -> dict:
-    """Calcula score de veracidad (0-100) y etiqueta a partir de metadatos de fuentes."""
-    nivel = item.get("nivel_fuente", 3)
-    confirmada = item.get("confirmada", False)
-    n_fuentes = item.get("n_fuentes", 1)
-    fuente_verificada = item.get("fuente_verificada", False)
-
-    score = 40  # base
-
-    if nivel == 1:    # agencia/ciencia
-        score += 35
-    elif nivel == 2:  # prensa
-        score += 20
-    elif nivel == 4:  # alerta/PR sin confirmar
-        score -= 20
-
-    if confirmada:
-        score += 20
-    if n_fuentes >= 3:
-        score += 15
-    elif n_fuentes == 2:
-        score += 8
-    if fuente_verificada:
-        score += 8
-
-    score = max(0, min(100, score))
-
-    if score >= 75:
-        label, color = "Verificada", "#4ade80"
-    elif score >= 45:
-        label, color = "En investigación", "#fbbf24"
-    else:
-        label, color = "Sin confirmar", "#f87171"
-
+    """Fiabilidad 0-100 (fiabilidad.py) con sus razones. Mantiene los campos
+    veracidad_* que ya usan el Gestor y la web."""
+    from fiabilidad import calcular
+    f = calcular(item)
     fuentes_list = item.get("fuentes_confirmacion") or ([item.get("fuente")] if item.get("fuente") else [])
-    evidencia = ", ".join(filter(None, fuentes_list[:4]))
-
     return {
-        "veracidad_score": score,
-        "veracidad_label": label,
-        "veracidad_color": color,
-        "veracidad_evidencia": evidencia,
+        **f,
+        "veracidad_score": f["fiabilidad"],
+        "veracidad_label": f["fiabilidad_label"],
+        "veracidad_color": f["fiabilidad_color"],
+        "veracidad_evidencia": ", ".join(filter(None, fuentes_list[:4])),
     }
 
 

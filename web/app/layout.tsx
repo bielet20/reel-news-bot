@@ -41,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <NavLink href="/">Generar</NavLink>
           <NavLink href="/gestor">Gestor</NavLink>
           <NavLink href="/montaje">Montaje</NavLink>
+          <NavLink href="/fuentes">Fuentes</NavLink>
           <NavLink href="/canales">Canales</NavLink>
           <NavLink href="/tiktok">TikTok</NavLink>
           <NavLink href="/library">Biblioteca</NavLink>

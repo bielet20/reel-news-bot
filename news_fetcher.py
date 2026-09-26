@@ -605,11 +605,15 @@ def _lookup_dominio(mapa: dict, dominio: str, default=None):
 
 
 def _org_de_nombre(nombre: str) -> str:
-    return re.sub(
+    org = re.sub(
         r"\s+(AI|Tech|World|Health|Science|Business|Sport|Markets|ES|Español|Environment)$",
         "",
         nombre or "",
-    ).strip() or (nombre or "desconocida")
+    ).strip()
+    # "El Español" no es "El" + sufijo: si solo queda un artículo, es el nombre entero
+    if not org or org.lower() in ("el", "la", "los", "las", "the"):
+        return (nombre or "desconocida").strip()
+    return org
 
 
 def _nivel_y_org(fuente: str, url: str, nombre_feed: str | None = None) -> tuple[int, str]:
@@ -1062,6 +1066,14 @@ def buscar_variadas(temas=None, por_tema: int = 3, pais: str = "ES") -> list:
 
     agrupados.sort(key=lambda it: -it["score_noticia"])
     return agrupados
+
+
+# Fuentes añadidas y ajustes hechos desde la app (_config/fuentes.json)
+try:
+    from fuentes import aplicar as _aplicar_fuentes_usuario
+    _aplicar_fuentes_usuario()
+except Exception as _e:  # noqa: BLE001
+    print(f"[fuentes] No se pudieron aplicar las fuentes del usuario: {_e}")
 
 
 if __name__ == "__main__":
