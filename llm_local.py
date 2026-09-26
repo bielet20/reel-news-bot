@@ -56,3 +56,20 @@ def completar(prompt: str, max_tokens: int = 2500, temperature: float = 0.7,
     if not texto:
         raise RuntimeError("LM Studio devolvió una respuesta vacía")
     return texto
+
+
+def liberar_gpu_para_video() -> bool:
+    """Descarga el modelo de LM Studio antes de generar imagen o vídeo en ComfyUI.
+
+    Con el LLM cargado (~5 GB) ComfyUI se queda sin VRAM y tiene que mover
+    modelos a disco: una imagen de Flux schnell pasó de segundos a 5 min.
+    Lo pide al Centro de Control del AI Studio; LM Studio sigue en marcha y
+    recarga el modelo solo en la siguiente petición de texto."""
+    try:
+        from comfy_video_builder import liberar_lm_studio_vram
+        ok = liberar_lm_studio_vram()
+    except Exception:  # noqa: BLE001
+        ok = False
+    print(f"   [gpu] LM Studio {'descargado' if ok else 'no se pudo descargar (¿Centro de Control apagado?)'} "
+          "antes de usar ComfyUI")
+    return ok

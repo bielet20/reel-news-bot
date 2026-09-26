@@ -384,6 +384,9 @@ def generar_miniaturas(slug: str, carpeta_salida: str, titulo: str, guion: str =
     try:
         c = _concepto(titulo, guion)
         _log(f"texto: {c['texto']} | destacar: {c['destacar']} | etiqueta: {c['etiqueta']}")
+        # El texto ya está: fuera el modelo de LM Studio para que Flux tenga toda la GPU
+        from llm_local import liberar_gpu_para_video
+        liberar_gpu_para_video()
         fondo_v, fondo_h, origen = _fondos(c, imagenes or [], url_articulo, tmp)
         _log(f"fondo: {origen}")
         cover = carpeta / f"{slug}_cover.jpg"
