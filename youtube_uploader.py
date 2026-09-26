@@ -238,6 +238,11 @@ def subir_video(
     """
     from googleapiclient.http import MediaFileUpload
 
+    if thumbnail_path is None:
+        # la miniatura generada junto al reel (thumbnail_maker), si existe
+        from thumbnail_maker import portadas_de
+        thumbnail_path = portadas_de(video_path)["thumbnail"]
+
     service = _get_service()
 
     categoria    = _CAT_NOTICIAS if tipo == "noticia" else _CAT_EDUCACION

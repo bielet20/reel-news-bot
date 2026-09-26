@@ -90,18 +90,19 @@ def _refresh_token(token: dict) -> dict:
 
 # ── Paso 1: contenedor ────────────────────────────────────────────────────────
 
-def _crear_contenedor(ig_user_id: str, access_token: str, caption: str, file_size: int) -> tuple[str, str]:
+def _crear_contenedor(ig_user_id: str, access_token: str, caption: str, file_size: int,
+                      cover_url: str | None = None) -> tuple[str, str]:
     """Devuelve (container_id, upload_uri)."""
-    resp = requests.post(
-        f"{GRAPH_API}/{ig_user_id}/media",
-        params={
-            "media_type":   "REELS",
-            "upload_type":  "resumable",
-            "caption":      caption[:2200],
-            "share_to_feed": "true",
-            "access_token": access_token,
-        },
-    )
+    params = {
+        "media_type":   "REELS",
+        "upload_type":  "resumable",
+        "caption":      caption[:2200],
+        "share_to_feed": "true",
+        "access_token": access_token,
+    }
+    if cover_url:
+        params["cover_url"] = cover_url
+    resp = requests.post(f"{GRAPH_API}/{ig_user_id}/media", params=params)
     if not resp.ok:
         raise RuntimeError(f"Error creando contenedor: {resp.status_code} {resp.text}")
     data = resp.json()
@@ -227,13 +228,32 @@ def subir_video(video_path: str, caption: str = "") -> dict:
 
     print(f"[Instagram] Subiendo {file_path.name} ({file_size // 1024 // 1024} MB)...")
 
-    container_id, upload_uri = _crear_contenedor(ig_user_id, access_token, caption or "", file_size)
-    print(f"[Instagram] Contenedor creado: {container_id}")
+    # Portada: Instagram la pide por URL pública (cover_url). Se aloja un momento
+    # como foto no publicada de la página de Facebook y se borra al terminar.
+    cover_url, foto_id = None, None
+    try:
+        from thumbnail_maker import portadas_de
+        cover = portadas_de(video_path)["cover"]
+        if cover:
+            from facebook_uploader import alojar_imagen_temporal
+            foto_id, cover_url = alojar_imagen_temporal(cover)
+            print("[Instagram] Portada preparada")
+    except Exception as e:  # noqa: BLE001
+        print(f"[Instagram][WARN] Sin portada personalizada: {e}")
 
-    _subir_chunks(upload_uri, access_token, file_path)
-    print("[Instagram] Video subido, esperando procesamiento...")
+    try:
+        container_id, upload_uri = _crear_contenedor(ig_user_id, access_token, caption or "",
+                                                     file_size, cover_url)
+        print(f"[Instagram] Contenedor creado: {container_id}")
 
-    _esperar_procesamiento(container_id, access_token)
+        _subir_chunks(upload_uri, access_token, file_path)
+        print("[Instagram] Video subido, esperando procesamiento...")
+
+        _esperar_procesamiento(container_id, access_token)
+    finally:
+        if foto_id:
+            from facebook_uploader import borrar_foto
+            borrar_foto(foto_id)
 
     media_id  = _publicar(ig_user_id, container_id, access_token)
     permalink = _obtener_permalink(media_id, access_token)

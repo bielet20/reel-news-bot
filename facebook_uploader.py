@@ -70,6 +70,58 @@ def _es_reel(video_path: str) -> bool:
     return h > w and 3 <= dur <= 90
 
 
+def _poner_portada(video_id: str, access_token: str, video_path: str, vertical: bool) -> bool:
+    """Pone como imagen preferida del vídeo la portada generada (thumbnail_maker).
+    No es crítico: si falla, el vídeo queda publicado con el fotograma de Facebook."""
+    try:
+        from thumbnail_maker import portadas_de
+        p = portadas_de(video_path)
+        img = p["cover"] if vertical else (p["thumbnail"] or p["cover"])
+        if not img:
+            return False
+        with open(img, "rb") as f:
+            _check(http.post(
+                f"{_GRAPH}/{video_id}/thumbnails",
+                data={"is_preferred": "true", "access_token": access_token},
+                files={"source": (Path(img).name, f, "image/jpeg")},
+                timeout=60,
+            ))
+        print(f"[Facebook] Portada puesta: {Path(img).name}")
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[Facebook][WARN] No se pudo poner la portada: {e}")
+        return False
+
+
+def alojar_imagen_temporal(ruta: str) -> tuple[str, str]:
+    """Sube una imagen a la página como foto NO publicada (no aparece en el
+    muro) y devuelve (photo_id, url_publica). Sirve para APIs que piden la
+    imagen por URL, como la portada de los Reels de Instagram (cover_url).
+    Bórrala después con borrar_foto(photo_id)."""
+    page_id, access_token = _get_credentials()
+    with open(ruta, "rb") as f:
+        foto = _check(http.post(
+            f"{_GRAPH}/{page_id}/photos",
+            data={"published": "false", "access_token": access_token},
+            files={"source": (Path(ruta).name, f, "image/jpeg")},
+            timeout=60,
+        ))
+    imgs = _check(http.get(f"{_GRAPH}/{foto['id']}",
+                           params={"fields": "images", "access_token": access_token},
+                           timeout=20)).get("images", [])
+    if not imgs:
+        raise RuntimeError("Facebook no devolvió la URL de la imagen")
+    return foto["id"], max(imgs, key=lambda i: i.get("width", 0))["source"]
+
+
+def borrar_foto(photo_id: str) -> None:
+    try:
+        _, access_token = _get_credentials()
+        http.delete(f"{_GRAPH}/{photo_id}", params={"access_token": access_token}, timeout=20)
+    except Exception:
+        pass
+
+
 def subir_reel(video_path: str, descripcion: str = "") -> dict:
     """Publica un Reel en la Página (API video_reels: start → subida → finish)."""
     page_id, access_token = _get_credentials()
@@ -121,9 +173,10 @@ def subir_reel(video_path: str, descripcion: str = "") -> dict:
     if estado.get("video_status") == "error":
         raise RuntimeError(f"Facebook rechazó el Reel: {estado}")
 
+    portada = _poner_portada(video_id, access_token, video_path, vertical=True)
     return {"ok": True, "video_id": video_id, "reel": True,
             "url": f"https://www.facebook.com/reel/{video_id}",
-            "estado": estado.get("video_status", "processing")}
+            "estado": estado.get("video_status", "processing"), "portada": portada}
 
 
 def subir_video(video_path: str, titulo: str = "", descripcion: str = "") -> dict:
@@ -150,7 +203,9 @@ def subir_video(video_path: str, titulo: str = "", descripcion: str = "") -> dic
         raise RuntimeError(f"Facebook API: {data['error'].get('message', str(data['error']))}")
     resp.raise_for_status()
     video_id = data.get("id", "")
-    return {"ok": True, "video_id": video_id, "url": f"https://www.facebook.com/video/{video_id}"}
+    portada = _poner_portada(video_id, access_token, video_path, vertical=False) if video_id else False
+    return {"ok": True, "video_id": video_id, "url": f"https://www.facebook.com/video/{video_id}",
+            "portada": portada}
 
 
 def publicar_texto(texto: str, link: str = "") -> dict:

@@ -439,3 +439,15 @@ def generar_para_reel(video_filename: str, carpeta_salida: str) -> dict:
     finally:
         for i in imagenes:
             Path(i).unlink(missing_ok=True)
+
+
+def portadas_de(video_path: str) -> dict:
+    """Portada vertical y miniatura 16:9 que acompañan a un vídeo de output/
+    ({slug}_cover.jpg / {slug}_thumbnail.jpg). Valores None si no existen."""
+    p = Path(video_path)
+    slug = re.sub(r"(_short\d+)?_(music_)?(reel|largo)$", "", p.stem)
+    out = {}
+    for clave, sufijo in (("cover", "_cover.jpg"), ("thumbnail", "_thumbnail.jpg")):
+        f = p.parent / f"{slug}{sufijo}"
+        out[clave] = str(f) if f.is_file() else None
+    return out
