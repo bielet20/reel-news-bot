@@ -80,7 +80,7 @@ def calcular(item: dict) -> dict:
 
 # ── Cobertura: quién más publica la historia ─────────────────────────────────
 
-def verificar_cobertura(item: dict, dias_max: float = 3.0) -> dict:
+def verificar_cobertura(item: dict, dias_max: float = 3.0, excluir_dominio: str | None = None) -> dict:
     """Busca la misma historia en Google News (inglés y español) y añade los
     medios FIABLES (dominios de la lista de fuentes) que la publican en los
     últimos días. Así "confirmada" no depende de que la historia coincida por
@@ -116,6 +116,9 @@ def verificar_cobertura(item: dict, dias_max: float = 3.0) -> dict:
             nombre = getattr(src, "title", "") if src is not None else ""
             if not href or not nf._es_dominio_confiable(href):
                 continue
+            dom = nf._dominio_de(href)
+            if excluir_dominio and (dom == excluir_dominio or dom.endswith("." + excluir_dominio)):
+                continue  # el propio medio no se confirma a sí mismo
             pub = e.get("published_parsed")
             if pub and (_t.time() - _t.mktime(pub)) > dias_max * 86400:
                 continue
@@ -126,7 +129,7 @@ def verificar_cobertura(item: dict, dias_max: float = 3.0) -> dict:
                 continue
             orgs.add(org)
             detalle.append({"org": org, "fuente": nombre, "url": e.get("link", ""),
-                            "nivel": nivel, "rol": "confirmación"})
+                            "dominio": dom, "nivel": nivel, "rol": "confirmación"})
     item["fuentes_detalle"] = detalle
     item["fuentes_confirmacion"] = sorted(o for o in orgs if o)
     item["n_fuentes"] = len(orgs)

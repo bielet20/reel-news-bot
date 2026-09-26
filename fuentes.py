@@ -192,11 +192,14 @@ def aplicar() -> None:
         else:
             fv[f["url"]] = f["nombre"]
         nivel_feed[f["nombre"]] = int(f["nivel"])
-        if f.get("dominio"):
-            nivel_dom[f["dominio"]] = int(f["nivel"])
-            org_dom[f["dominio"]] = f["nombre"]
-            if int(f["nivel"]) <= 3:
-                confiables.add(f["dominio"])
+        dom = f.get("dominio")
+        if dom and dom not in nf._NIVEL_DOMINIO_ORIG and dom not in nf._ORG_DOMINIO_ORIG:
+            # Dominio nuevo: darle nivel y nombre. Si ya existía (p. ej. nasa.gov
+            # al añadir "NASA en español") se respeta el de la lista integrada.
+            nivel_dom[dom] = int(f["nivel"])
+            org_dom[dom] = f["nombre"]
+        if dom and int(f["nivel"]) <= 3:
+            confiables.add(dom)
     url_de = {n: u for u, n in nf._FUENTES_VERIFICADAS_ORIG.items()}
     for v in nf._FUENTES_POR_CATEGORIA_ORIG.values():
         for u, n in v:
@@ -216,3 +219,169 @@ def aplicar() -> None:
     nf.NIVEL_DOMINIO.clear(); nf.NIVEL_DOMINIO.update(nivel_dom)
     nf._ORG_DOMINIO.clear(); nf._ORG_DOMINIO.update(org_dom)
     nf.DOMINIOS_CONFIABLES.clear(); nf.DOMINIOS_CONFIABLES.update(confiables)
+
+
+# ── Evaluación automática de credibilidad ───────────────────────────────────
+
+CALIBRACION = Path(__file__).parent / "_config" / "calibracion_fuentes.json"
+_SENSACIONALES = ("increíble", "impactante", "no creerás", "no vas a creer", "brutal", "escándalo",
+                  "urgente", "última hora", "shocking", "you won't believe", "insane", "unbelievable",
+                  "viral", "bombazo", "alucinante", "lo que pasó", "esto es lo que")
+
+
+def _sensacionalismo(titulos: list[str]) -> float:
+    """Fracción de titulares con recursos sensacionalistas."""
+    def es_sensacional(t: str) -> bool:
+        tl = t.lower()
+        mayus = sum(1 for w in re.findall(r"\b[A-ZÁÉÍÓÚÑ]{4,}\b", t))
+        return ("!" in t or "¡" in t or mayus >= 2 or any(s in tl for s in _SENSACIONALES))
+    return (sum(es_sensacional(t) for t in titulos) / len(titulos)) if titulos else 0.0
+
+
+def _medir(feed_url: str, dominio: str, max_titulares: int = 8) -> dict:
+    """Mide corroboración, sensacionalismo y frecuencia de un feed."""
+    import time as _t
+    import feedparser
+    from fiabilidad import verificar_cobertura
+
+    feed = feedparser.parse(feed_url)
+    entradas = [e for e in feed.entries if e.get("title")][:40]
+    # La corroboración solo mira los últimos 3 días: medir titulares viejos
+    # (habitual en feeds de Google News) castigaba sin motivo a las agencias
+    recientes = [e for e in entradas if e.get("published_parsed")
+                 and _t.time() - _t.mktime(e["published_parsed"]) <= 3 * 86400]
+    if len(recientes) >= 3:
+        entradas = recientes
+    titulos = [re.sub(r"\s+[-|–]\s+[^-|–]+$", "", e["title"]) for e in entradas]
+    fechas = sorted(_t.mktime(e["published_parsed"]) for e in entradas if e.get("published_parsed"))
+    por_dia = None
+    if len(fechas) >= 2 and fechas[-1] > fechas[0]:
+        por_dia = round(len(fechas) / max((fechas[-1] - fechas[0]) / 86400, 0.04), 1)
+
+    muestra, confirmadas, fuertes = [], 0, 0
+    for t in titulos[:max_titulares]:
+        it = verificar_cobertura({"titulo_original": t, "org_fuente": f"__{dominio}__",
+                                  "fuentes_detalle": []}, excluir_dominio=dominio)
+        otros = [d for d in it.get("fuentes_detalle", []) if d.get("org") != f"__{dominio}__"]
+        n1_2 = [d for d in otros if int(d.get("nivel", 3)) <= 2]
+        confirmadas += bool(otros)
+        fuertes += bool(n1_2)
+        muestra.append({"titular": t, "confirman": [d["org"] for d in otros][:5],
+                        "nivel_1_2": bool(n1_2)})
+    n = len(muestra) or 1
+    return {
+        "titulares": len(titulos),
+        "corroboracion": round(confirmadas / n, 2),       # la publican otros medios fiables
+        "corroboracion_fuerte": round(fuertes / n, 2),    # …de nivel 1-2
+        "sensacionalismo": round(_sensacionalismo(titulos), 2),
+        "por_dia": por_dia,
+        "muestra": muestra,
+    }
+
+
+def _puntuacion(m: dict, https: bool, rss_propio: bool) -> int:
+    s = 55 * m["corroboracion_fuerte"] + 20 * m["corroboracion"]
+    s += 15 * (1 - m["sensacionalismo"])
+    s += 5 * https + 5 * rss_propio
+    return int(round(max(0, min(100, s))))
+
+
+def calibracion() -> dict:
+    try:
+        return json.loads(CALIBRACION.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+_CATS_ACTUALIDAD = ("general", "mundo", "politica", "economia")
+
+
+def calibrar(por_nivel: int = 4, log=print) -> dict:
+    """Mide fuentes de NOTICIAS DE ACTUALIDAD que ya tienes de cada nivel
+    (incluidas las agencias, que se leen por Google News) para saber cómo
+    puntúa cada nivel en la práctica. Los medios especializados publican
+    análisis propios que nadie repite y no sirven de referencia."""
+    niveles: dict[int, list[int]] = {1: [], 2: [], 3: [], 4: []}
+    detalle: dict[int, list[dict]] = {1: [], 2: [], 3: [], 4: []}
+    candidatas = [f for f in listar() if f["activa"] and f["categoria"] in _CATS_ACTUALIDAD]
+    candidatas.sort(key=lambda f: _CATS_ACTUALIDAD.index(f["categoria"]))
+    for f in candidatas:
+        nv = f["nivel"]
+        if len(niveles[nv]) >= por_nivel:
+            continue
+        try:
+            m = _medir(f["url"], f["dominio"], max_titulares=6)
+        except Exception:
+            continue
+        if m["titulares"] < 3:
+            continue
+        p = _puntuacion(m, f["url"].startswith("https"), True)
+        niveles[nv].append(p)
+        detalle[nv].append({"nombre": f["nombre"], "puntuacion": p, "corroboracion": m["corroboracion"],
+                            "corroboracion_fuerte": m["corroboracion_fuerte"],
+                            "sensacionalismo": m["sensacionalismo"]})
+        log(f"[calibración] nivel {nv}: {f['nombre']} → {p}")
+    res = {"fecha": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+           "niveles": {str(k): {"media": round(sum(v) / len(v)) if v else None, "fuentes": detalle[k]}
+                       for k, v in niveles.items()}}
+    CALIBRACION.parent.mkdir(exist_ok=True)
+    CALIBRACION.write_text(json.dumps(res, indent=2, ensure_ascii=False), encoding="utf-8")
+    return res
+
+
+def evaluar(url: str) -> dict:
+    """Informe de credibilidad de una fuente nueva y su nivel sugerido,
+    comparado con cómo puntúan las fuentes que ya tienes."""
+    import news_fetcher as nf
+    url = url.strip()
+    feed, _ = _resolver_feed(url)
+    dominio = _dominio(url)
+    rss_propio = "news.google.com" not in feed
+    m = _medir(feed, dominio)
+    https = url.startswith("https") or feed.startswith("https")
+    puntuacion = _puntuacion(m, https, rss_propio)
+
+    cal = calibracion().get("niveles", {})
+    medias = {int(k): v["media"] for k, v in cal.items() if v.get("media") is not None}
+    # La calibración solo vale si es coherente: cada nivel puntúa más que el siguiente
+    orden = [medias[k] for k in sorted(medias)]
+    coherente = len(orden) >= 3 and all(a > b for a, b in zip(orden, orden[1:]))
+    if coherente:
+        # umbral entre dos niveles = punto medio de sus medias
+        niveles_ord = sorted(medias)
+        nivel_sugerido = niveles_ord[-1]
+        for a, b in zip(niveles_ord, niveles_ord[1:]):
+            if puntuacion >= (medias[a] + medias[b]) / 2:
+                nivel_sugerido = a
+                break
+    else:  # sin calibrar o calibración incoherente: umbrales fijos
+        nivel_sugerido = 1 if puntuacion >= 75 else 2 if puntuacion >= 55 else 3 if puntuacion >= 30 else 4
+    if m["sensacionalismo"] >= 0.4:
+        nivel_sugerido = max(nivel_sugerido, 3)  # muy sensacionalista: nunca 1-2
+
+    # Las fuentes de tu lista (medidas en la calibración) que puntúan más parecido
+    medidas = [f | {"nivel": int(k)} for k, v in cal.items() for f in v.get("fuentes", [])]
+    parecidas = sorted(medidas, key=lambda f: abs(f["puntuacion"] - puntuacion))[:4]
+
+    ya = nf._lookup_dominio(getattr(nf, "_NIVEL_DOMINIO_ORIG", nf.NIVEL_DOMINIO), dominio)
+    razones = [
+        f"{int(m['corroboracion'] * 100)}% de sus titulares los publican otros medios fiables "
+        f"({int(m['corroboracion_fuerte'] * 100)}% confirmados por nivel 1-2)",
+        f"Sensacionalismo: {int(m['sensacionalismo'] * 100)}% de los titulares",
+        ("Tiene RSS propio" if rss_propio else "Sin RSS propio (se leerá por Google News)")
+        + (" · HTTPS" if https else " · sin HTTPS"),
+    ]
+    if m["por_dia"]:
+        razones.append(f"Publica unas {m['por_dia']} noticias al día")
+    if ya:
+        razones.append(f"Ya está en tu lista como nivel {ya}")
+    por_dia = m["por_dia"] or 0
+    if m["corroboracion"] < 0.2 and por_dia >= 40:
+        razones.append(f"Mucho volumen ({int(por_dia)} al día) y casi nada confirmado por medios fiables: "
+                       "señal de poca verificación.")
+    elif m["corroboracion"] < 0.35 and m["sensacionalismo"] < 0.15 and por_dia < 15:
+        razones.append("Pocas noticias confirmadas por otros pero nada sensacionalista y poco volumen: puede ser "
+                       "un medio especializado con contenido propio (análisis, exclusivas). Revisa el nivel a mano.")
+    return {"feed": feed, "dominio": dominio, "puntuacion": puntuacion, "nivel_sugerido": nivel_sugerido,
+            "nivel_actual": ya, "medias_por_nivel": medias, "razones": razones,
+            "calibrado": coherente, "parecidas": parecidas, **m}

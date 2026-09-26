@@ -126,3 +126,45 @@ def analizar_ahora(req: Analizar):
     _analisis_estado.update(activo=True, error=None)
     threading.Thread(target=_job, daemon=True).start()
     return {"ok": True, "analizando": True}
+
+
+_calibrando = {"activo": False, "error": None}
+
+
+@router.post("/api/fuentes/evaluar")
+def evaluar_fuente(req: Prueba):
+    """Mide la credibilidad de una fuente (corroboración de sus titulares por
+    medios fiables, sensacionalismo, RSS/HTTPS) y sugiere su nivel comparándola
+    con cómo puntúan tus fuentes de cada nivel. ~15-30 s."""
+    import fuentes
+    try:
+        return fuentes.evaluar(req.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/api/fuentes/calibracion")
+def ver_calibracion():
+    import fuentes
+    return {**fuentes.calibracion(), "calibrando": _calibrando["activo"], "error": _calibrando["error"]}
+
+
+@router.post("/api/fuentes/calibrar")
+def calibrar_fuentes():
+    """Mide 3 fuentes de cada nivel para tener la referencia (unos minutos)."""
+    if _calibrando["activo"]:
+        return {"calibrando": True}
+
+    def _job():
+        import fuentes
+        try:
+            fuentes.calibrar()
+            _calibrando["error"] = None
+        except Exception as e:
+            _calibrando["error"] = str(e)
+        finally:
+            _calibrando["activo"] = False
+
+    _calibrando.update(activo=True, error=None)
+    threading.Thread(target=_job, daemon=True).start()
+    return {"calibrando": True}

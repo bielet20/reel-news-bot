@@ -45,6 +45,13 @@ interface Fuente {
   nombre: string; url: string; dominio: string; categoria: string;
   nivel: number; nivel_base: number; activa: boolean; tipo: "integrada" | "añadida";
 }
+interface Evaluacion {
+  feed: string; dominio: string; puntuacion: number; nivel_sugerido: number; nivel_actual: number | null;
+  medias_por_nivel: Record<string, number>; razones: string[]; calibrado: boolean;
+  corroboracion: number; corroboracion_fuerte: number; sensacionalismo: number; por_dia: number | null;
+  muestra: { titular: string; confirman: string[]; nivel_1_2: boolean }[];
+  parecidas?: { nombre: string; nivel: number; puntuacion: number }[];
+}
 interface Reglas {
   score_min: number; fiabilidad_min: number; min_medios: number; excluir_nivel4: boolean;
   auto_generate: boolean; auto_publish: boolean; enabled: boolean; interval_min: number;
@@ -85,6 +92,71 @@ function Expansion({ puntos }: { puntos: Punto[] }) {
   );
 }
 
+function InformeCredibilidad({ ev, onUsar }: { ev: Evaluacion; onUsar: (nivel: number) => void }) {
+  const medias = ev.medias_por_nivel || {};
+  return (
+    <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "var(--surface2)" }}>
+      <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 40, fontWeight: 800, color: NIVEL_COLOR[ev.nivel_sugerido] }}>{ev.puntuacion}</div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>credibilidad / 100</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, color: "var(--muted)" }}>Nivel sugerido</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: NIVEL_COLOR[ev.nivel_sugerido] }}>
+            Nivel {ev.nivel_sugerido} · {NIVEL_TXT[ev.nivel_sugerido]}
+          </div>
+          {ev.nivel_actual && <div style={{ fontSize: 12, color: "var(--muted)" }}>Ya la tienes como nivel {ev.nivel_actual}</div>}
+          <button style={{ ...btn, marginTop: 8, padding: "6px 12px" }} onClick={() => onUsar(ev.nivel_sugerido)}>
+            Usar nivel sugerido
+          </button>
+        </div>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          {ev.parecidas && ev.parecidas.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>Puntúa parecido a estas fuentes tuyas:</div>
+              {ev.parecidas.map((p) => (
+                <div key={p.nombre} style={{ fontSize: 13 }}>
+                  <b>{p.nombre}</b> <span style={{ color: NIVEL_COLOR[p.nivel] }}>· nivel {p.nivel}</span>
+                  <span style={{ color: "var(--muted)" }}> · {p.puntuacion}/100</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 6 }}>
+            {ev.calibrado ? "Media de tus fuentes por nivel" : "Media de tus fuentes por nivel (no ordenada: el nivel sugerido usa umbrales fijos)"}
+          </div>
+          {[1, 2, 3, 4].map((l) => medias[String(l)] != null && (
+            <div key={l} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, fontSize: 12 }}>
+              <span style={{ width: 70, color: NIVEL_COLOR[l] }}>Nivel {l}</span>
+              <div style={{ flex: 1, position: "relative", height: 10, background: "var(--bg)", borderRadius: 5 }}>
+                <div style={{ width: `${medias[String(l)]}%`, height: "100%", background: NIVEL_COLOR[l], opacity: 0.5, borderRadius: 5 }} />
+                <div title="Esta fuente" style={{ position: "absolute", left: `calc(${ev.puntuacion}% - 1px)`, top: -3, width: 3, height: 16, background: "var(--text)" }} />
+              </div>
+              <span style={{ width: 28, textAlign: "right" }}>{medias[String(l)]}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>La raya blanca es esta fuente.</div>
+        </div>
+      </div>
+      <ul style={{ margin: "12px 0 8px 18px", listStyle: "disc", fontSize: 13, lineHeight: 1.6 }}>
+        {ev.razones.map((r, j) => <li key={j}>{r}</li>)}
+      </ul>
+      <div style={{ fontSize: 13 }}>
+        <b>Sus titulares y quién los confirma:</b>
+        {ev.muestra.map((m, j) => (
+          <div key={j} style={{ padding: "4px 0", borderTop: j ? "1px solid var(--border)" : "none" }}>
+            <span style={{ color: m.confirman.length ? (m.nivel_1_2 ? "#22c55e" : "#fbbf24") : "#f87171" }}>
+              {m.confirman.length ? "✓" : "✗"}
+            </span>{" "}{m.titular}
+            <span style={{ color: "var(--muted)" }}> — {m.confirman.length ? m.confirman.join(", ") : "nadie más lo publica"}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function colorViral(s: number) { return s >= 8.5 ? "#f472b6" : s >= 7.5 ? "#a78bfa" : s >= 6 ? "#fbbf24" : "#94a3b8"; }
 
 export default function FuentesPage() {
@@ -99,13 +171,33 @@ export default function FuentesPage() {
   const [nueva, setNueva] = useState({ nombre: "", url: "", nivel: 3, categoria: "general" });
   const [prueba, setPrueba] = useState<{ feed?: string; muestra?: string[]; error?: string; cargando?: boolean } | null>(null);
   const [reglas, setReglas] = useState<Reglas | null>(null);
+  const [evaluacion, setEvaluacion] = useState<Evaluacion | { error: string } | "cargando" | null>(null);
+  const [calib, setCalib] = useState<{ fecha?: string; calibrando?: boolean; niveles?: Record<string, { media: number | null }> } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
 
   const cargarAnalisis = useCallback(() => fetch("/api/fuentes/analisis").then((r) => r.json()).then(setAnalisis).catch(() => {}), []);
   const cargarFuentes = useCallback(() => fetch("/api/fuentes").then((r) => r.json()).then((d) => { setFuentes(d.fuentes); setCategorias(d.categorias); }).catch(() => {}), []);
+  const cargarCalib = useCallback(() => fetch("/api/fuentes/calibracion").then((r) => r.json()).then(setCalib).catch(() => {}), []);
   const cargarReglas = useCallback(() => fetch("/api/scanner/status").then((r) => r.json()).then((d) => setReglas(d.config)).catch(() => {}), []);
 
-  useEffect(() => { cargarAnalisis(); cargarFuentes(); cargarReglas(); }, [cargarAnalisis, cargarFuentes, cargarReglas]);
+  useEffect(() => { cargarAnalisis(); cargarFuentes(); cargarReglas(); cargarCalib(); }, [cargarAnalisis, cargarFuentes, cargarReglas, cargarCalib]);
+  useEffect(() => {
+    if (!calib?.calibrando) return;
+    const t = setInterval(cargarCalib, 10000);
+    return () => clearInterval(t);
+  }, [calib?.calibrando, cargarCalib]);
+
+  async function evaluar() {
+    setEvaluacion("cargando");
+    const r = await fetch("/api/fuentes/evaluar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: nueva.url }) });
+    const d = await r.json();
+    setEvaluacion(r.ok ? d : { error: d.detail || "No se pudo evaluar" });
+  }
+
+  async function recalibrar() {
+    await fetch("/api/fuentes/calibrar", { method: "POST" });
+    cargarCalib();
+  }
   useEffect(() => {
     if (!analisis?.analizando) return;
     const t = setInterval(cargarAnalisis, 5000);
@@ -289,16 +381,34 @@ export default function FuentesPage() {
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
               <button style={btnGhost} disabled={!nueva.url || prueba?.cargando} onClick={probar}>{prueba?.cargando ? "Probando…" : "🔎 Probar"}</button>
+              <button style={btnGhost} disabled={!nueva.url || evaluacion === "cargando"} onClick={evaluar}>
+                {evaluacion === "cargando" ? "⏳ Evaluando (~30 s)…" : "🧪 Evaluar credibilidad"}
+              </button>
               <button style={{ ...btn, opacity: nueva.nombre && nueva.url ? 1 : 0.5 }} disabled={!nueva.nombre || !nueva.url} onClick={agregar}>➕ Añadir</button>
               <span style={{ fontSize: 12, color: "var(--muted)" }}>Si la web no tiene RSS, se usa Google News filtrado por su dominio.</span>
             </div>
             {prueba?.error && <p style={{ color: "var(--error)", marginBottom: 0 }}>{prueba.error}</p>}
+            {evaluacion && evaluacion !== "cargando" && "error" in evaluacion && (
+              <p style={{ color: "var(--error)", marginBottom: 0 }}>{evaluacion.error}</p>
+            )}
+            {evaluacion && evaluacion !== "cargando" && !("error" in evaluacion) && (
+              <InformeCredibilidad ev={evaluacion} onUsar={(nv) => setNueva({ ...nueva, nivel: nv })} />
+            )}
             {prueba?.muestra && (
               <div style={{ marginTop: 10, fontSize: 13 }}>
                 <div style={{ color: "var(--muted)" }}>Feed: {prueba.feed}</div>
                 <ul style={{ margin: "4px 0 0 18px", listStyle: "disc" }}>{prueba.muestra.map((m, j) => <li key={j}>{m}</li>)}</ul>
               </div>
             )}
+          </div>
+
+          <div style={{ ...card, padding: 12, marginBottom: 14, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+            <span style={{ color: "var(--muted)" }}>
+              Referencia de niveles: {calib?.calibrando ? "⏳ midiendo tus fuentes…" : calib?.fecha
+                ? `medida el ${new Date(calib.fecha).toLocaleString("es-ES")} — ` + [1, 2, 3, 4].map((l) => `nivel ${l}: ${calib.niveles?.[String(l)]?.media ?? "—"}`).join(" · ")
+                : "sin medir todavía"}
+            </span>
+            <button style={{ ...btnGhost, padding: "6px 12px" }} disabled={calib?.calibrando} onClick={recalibrar}>↻ Recalibrar</button>
           </div>
 
           <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
