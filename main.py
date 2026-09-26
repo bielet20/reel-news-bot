@@ -86,10 +86,12 @@ def generar_miniatura(
     carpeta_salida: str,
     url_articulo: str = None,
     titulo: str = "",
+    imagenes: list = None,
 ) -> str | None:
     """
-    Genera miniatura 1280×720 para YouTube.
-    Prioridad de fondo: og:image del artículo → imagen IA (Pollinations) → gradiente.
+    Miniatura RÁPIDA 1280×720 para YouTube (segundos, sin IA).
+    Prioridad de fondo: og:image del artículo → primera imagen del reel → gradiente.
+    La portada completa con IA (Flux + LM Studio) está en thumbnail_maker.
     """
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -110,14 +112,9 @@ def generar_miniatura(
             except Exception:
                 pass
 
-        # ── 2. Fallback: imagen IA 1280×720 ───────────────────────────────────
+        # ── 2. Fallback: primera imagen usada en el reel (local, sin servicios externos)
         if not img_fondo:
-            try:
-                from image_pipeline import generar_thumbnail_ai
-                prompt = titulo or hook
-                img_fondo = generar_thumbnail_ai(prompt, ruta_bg_tmp)
-            except Exception:
-                pass
+            img_fondo = next((i for i in (imagenes or []) if i and os.path.isfile(i)), None)
 
         # ── 3. Construir imagen base ───────────────────────────────────────────
         if img_fondo and os.path.exists(img_fondo):
@@ -176,7 +173,7 @@ def generar_miniatura(
             draw.text((W // 2, y), line, font=font, fill=(255, 255, 255), anchor="mm")
 
         # Banda inferior con nombre del canal
-        marca = os.environ.get("CANAL_NOMBRE", "BIELINFORMA")
+        marca = os.environ.get("CANAL_NOMBRE", "BIENINFORMA2")
         try:
             font_small = ImageFont.truetype(font.path, 30) if hasattr(font, "path") else ImageFont.load_default()
         except Exception:
@@ -476,22 +473,26 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
                     texto_personalizado=texto_personalizado)
     print(f"   Video generado: {ruta_video}")
 
-    # Portada vertical (_cover.jpg) + miniatura de YouTube (_thumbnail.jpg),
-    # todo en local: LM Studio para el texto y Flux (ComfyUI) para la imagen.
+    # Miniaturas. MINIATURAS_MODO (lo fija --portada-ia o el .env):
+    #   "completa" → portada vertical + miniatura con IA local (LM Studio + Flux), +3-6 min
+    #   "rapida"   → solo la miniatura sencilla de YouTube, en segundos (por defecto)
     url_art_thumb = noticia.get("link") if not (noticia.get("link") or "").startswith("/") else None
-    try:
-        from thumbnail_maker import generar_miniaturas
-        mini = generar_miniaturas(
-            slug, carpeta_salida, titulo_es, guion.get("guion", ""),
-            imagenes=imgs_fondo or [], url_articulo=url_art_thumb,
-        )
-        print(f"   Miniaturas generadas ({mini['fondo']}): {mini['cover']} · {mini['thumbnail']}")
-    except Exception as e:
-        print(f"   [WARN] Miniaturas nuevas fallaron ({e}); uso la miniatura simple")
-        ruta_thumb = generar_miniatura(slug, titulo_es, carpeta_salida,
-                                       url_articulo=url_art_thumb, titulo=titulo_es)
+    mini = None
+    if os.environ.get("MINIATURAS_MODO", "rapida").strip().lower() == "completa":
+        try:
+            from thumbnail_maker import generar_miniaturas
+            mini = generar_miniaturas(
+                slug, carpeta_salida, titulo_es, guion.get("guion", ""),
+                imagenes=imgs_fondo or [], url_articulo=url_art_thumb,
+            )
+            print(f"   Portada y miniatura IA ({mini['fondo']}): {mini['cover']} · {mini['thumbnail']}")
+        except Exception as e:
+            print(f"   [WARN] Portada IA falló ({e}); uso la miniatura rápida")
+    if not mini:
+        ruta_thumb = generar_miniatura(slug, titulo_es, carpeta_salida, url_articulo=url_art_thumb,
+                                       titulo=titulo_es, imagenes=imgs_fondo or [])
         if ruta_thumb:
-            print(f"   Miniatura generada: {ruta_thumb}")
+            print(f"   Miniatura rápida generada: {ruta_thumb}")
 
     # Guardar atribución de la fuente original
     _guardar_atribucion(slug, carpeta_salida, noticia, atribucion)
@@ -1220,6 +1221,9 @@ def main():
                         help="Pais para tendencias (codigo ISO: AR, US, ES, MX, CO ...). "
                              "Se usa con --trending y --trending-yt. Por defecto: AR.")
     # --- Opciones generales ---
+    parser.add_argument("--portada-ia", action="store_true",
+                        help="Genera portada vertical + miniatura con IA local (LM Studio + Flux). "
+                             "Tarda 3-6 min más por reel; sin esto, miniatura rápida.")
     parser.add_argument("--cantidad", type=int, default=1,
                         help="Cuantos items procesar (una por reel). Por defecto: 1.")
     parser.add_argument("--duracion-maxima", type=int, default=60,
@@ -1227,6 +1231,8 @@ def main():
     parser.add_argument("--largo", action="store_true",
                         help="Genera un video largo (7-10 min) con guion de 4 actos en vez de un Short.")
     args = parser.parse_args()
+    if args.portada_ia:
+        os.environ["MINIATURAS_MODO"] = "completa"
 
     generados = []
 

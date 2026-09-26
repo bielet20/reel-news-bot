@@ -9,6 +9,7 @@ interface VideoFile {
   filename: string;
   size: number;
   modified: string;
+  cover?: string | null;
 }
 
 export default function RecentVideos() {
@@ -17,6 +18,9 @@ export default function RecentVideos() {
   const [publishing, setPublishing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  // Portada IA bajo demanda (Flux tarda unos minutos): filename -> generando
+  const [portadas, setPortadas] = useState<Record<string, "generando" | "error">>({});
+  const [coverVer, setCoverVer] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -56,6 +60,28 @@ export default function RecentVideos() {
       alert("No se pudo eliminar el video.");
     } finally {
       setDeleting(null);
+    }
+  }
+
+  async function crearPortada(filename: string) {
+    setPortadas((p) => ({ ...p, [filename]: "generando" }));
+    try {
+      const r = await fetch(`/api/output/${encodeURIComponent(filename)}/miniaturas`, { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      // Se genera en segundo plano: consultar hasta que termine
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 8000));
+        const s = await fetch(`/api/output/${encodeURIComponent(filename)}/miniaturas`).then((x) => x.json());
+        if (s.estado === "generando") continue;
+        if (s.estado !== "ok") throw new Error(s.error || s.estado);
+        break;
+      }
+      const lista: VideoFile[] = await fetch("/api/output").then((x) => x.json());
+      setVideos(lista);
+      setCoverVer((n) => n + 1);
+      setPortadas((p) => { const n = { ...p }; delete n[filename]; return n; });
+    } catch {
+      setPortadas((p) => ({ ...p, [filename]: "error" }));
     }
   }
 
@@ -124,7 +150,16 @@ export default function RecentVideos() {
             onClick={() => setSelected(selected === v.filename ? null : v.filename)}
           >
             <div className="flex items-center gap-3 min-w-0">
-              <span className="text-lg">🎬</span>
+              {v.cover ? (
+                <a href={`/videos/${encodeURIComponent(v.cover)}?v=${coverVer}`} target="_blank" rel="noreferrer"
+                   onClick={(e) => e.stopPropagation()} title="Ver portada">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/videos/${encodeURIComponent(v.cover)}?v=${coverVer}`} alt="Portada"
+                       style={{ width: 27, height: 48, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border)" }} />
+                </a>
+              ) : (
+                <span className="text-lg">🎬</span>
+              )}
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate" style={{ color: "var(--text)" }}>
                   {v.filename.replace(/_reel\.mp4$/, "").replace(/_music_reel\.mp4$/, "").replace(/-/g, " ")}
@@ -135,6 +170,22 @@ export default function RecentVideos() {
               </div>
             </div>
             <div className="flex gap-2 ml-3 shrink-0">
+              <button
+                onClick={(e) => { e.stopPropagation(); if (!portadas[v.filename] || portadas[v.filename] === "error") crearPortada(v.filename); }}
+                disabled={portadas[v.filename] === "generando"}
+                title="Portada vertical + miniatura con IA local (Flux). Tarda unos minutos."
+                className="text-xs px-3 py-1.5 rounded-lg"
+                style={{
+                  background: "var(--surface2)", border: "1px solid var(--border)",
+                  color: portadas[v.filename] === "error" ? "#f87171" : "#fbbf24",
+                  cursor: portadas[v.filename] === "generando" ? "wait" : "pointer",
+                  opacity: portadas[v.filename] === "generando" ? 0.7 : 1,
+                }}
+              >
+                {portadas[v.filename] === "generando" ? "⏳ Generando portada…"
+                  : portadas[v.filename] === "error" ? "⚠ Reintentar portada"
+                  : v.cover ? "↻ Portada IA" : "✨ Portada IA"}
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setPublishing(v.filename); }}
                 className="text-xs px-3 py-1.5 rounded-lg"

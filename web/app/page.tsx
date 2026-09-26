@@ -98,6 +98,7 @@ export default function Home() {
   const [musicaMostrarNombre, setMusicaMostrarNombre] = useState(false);
   const [tipoContenido, setTipoContenido] = useState<"noticia" | "curiosidad">("noticia");
   const [subirYoutube, setSubirYoutube] = useState(false);
+  const [portadaIa, setPortadaIa] = useState(false);
   const [ytCredOk, setYtCredOk] = useState<boolean | null>(null);
   const [ytCanal, setYtCanal] = useState("");
   const [cantidad, setCantidad] = useState(1);
@@ -255,6 +256,16 @@ export default function Home() {
         ],
       },
       {
+        title: "Miniaturas",
+        items: [
+          {
+            label: portadaIa ? "Portada y miniatura con IA (+3-6 min)" : "Miniatura rápida",
+            active: portadaIa,
+            onToggle: () => setPortadaIa((v) => !v),
+          },
+        ],
+      },
+      {
         title: "Publicar en YouTube",
         items: [
           {
@@ -345,6 +356,7 @@ export default function Home() {
 
     body.tipo_contenido = tipoContenido;
     body.subir_youtube  = subirYoutube;
+    body.portada_ia     = portadaIa;
 
     try {
       const res = await fetch("/api/generate", {
@@ -785,6 +797,19 @@ export default function Home() {
                 placeholder="ej: @micanal — vacío = sin marca"
               />
             </Field>
+
+            {/* ── Miniaturas ───────────────────────────────────────── */}
+            <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>Miniaturas</p>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <Toggle value={portadaIa} onChange={setPortadaIa} />
+                <span style={{ fontSize: 13, color: portadaIa ? "var(--text)" : "var(--muted)" }}>
+                  {portadaIa
+                    ? "Portada vertical + miniatura con IA local (Flux) — tarda 3-6 min más"
+                    : "Miniatura rápida (segundos). La portada IA se puede crear después desde la lista"}
+                </span>
+              </label>
+            </div>
 
             {/* ── Publicar en YouTube ──────────────────────────────── */}
             <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>

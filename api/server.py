@@ -195,6 +195,8 @@ class GenerateRequest(BaseModel):
     estado_verificacion: Optional[str] = None
     # Video largo (7-10 min, 4 actos)
     largo: bool = False
+    # Portada vertical + miniatura con IA local (Flux): +3-6 min por reel
+    portada_ia: bool = False
 
 
 def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> list:
@@ -244,6 +246,8 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
         args += ["--sin-titulo"]
     if not req.mostrar_subtitulos:
         args += ["--sin-subtitulos"]
+    if req.portada_ia:
+        args += ["--portada-ia"]
     if req.musica_fondo:
         music_path = CORE_DIR / "_music" / req.musica_fondo
         if music_path.exists():
@@ -488,10 +492,13 @@ def list_output():
     files = []
     for f in sorted(OUTPUT_DIR.glob("*_reel.mp4"),
                     key=lambda x: x.stat().st_mtime, reverse=True):
+        slug = re.sub(r"(_short\d+)?_(music_)?reel$", "", f.stem)
+        cover = OUTPUT_DIR / f"{slug}_cover.jpg"
         files.append({
             "filename": f.name,
             "size": f.stat().st_size,
             "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+            "cover": cover.name if cover.exists() else None,
         })
     return files
 
