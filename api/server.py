@@ -197,6 +197,8 @@ class GenerateRequest(BaseModel):
     largo: bool = False
     # Portada vertical + miniatura con IA local (Flux): +3-6 min por reel
     portada_ia: bool = False
+    # Fondos de vídeo en movimiento con IA local (Flux + LTX): ~15 min por reel
+    video_ia: bool = False
 
 
 def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> list:
@@ -248,6 +250,8 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
         args += ["--sin-subtitulos"]
     if req.portada_ia:
         args += ["--portada-ia"]
+    if req.video_ia:
+        args += ["--video-ia"]
     if req.musica_fondo:
         music_path = CORE_DIR / "_music" / req.musica_fondo
         if music_path.exists():
@@ -499,6 +503,8 @@ def list_output():
             "size": f.stat().st_size,
             "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
             "cover": cover.name if cover.exists() else None,
+            "video_ia": (OUTPUT_DIR / f"{slug}_video_ia.json").exists(),
+            "narrado": (OUTPUT_DIR / f"{slug}_guion_reel.txt").exists(),
         })
     return files
 
@@ -516,7 +522,7 @@ def output_stats():
 # Sidecars que puede generar un reel, segun el pipeline que lo creo
 # (narrado: audio/caption/fuente/guion — clip/musica: info). Todos comparten
 # el mismo slug base que el .mp4 (ver main.py: _guardar_atribucion, _info.txt).
-_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt", "_thumbnail.jpg", "_cover.jpg", "_miniatura.json")
+_SIDECAR_SUFFIXES = ("_audio.mp3", "_caption.txt", "_fuente.json", "_guion.txt", "_info.txt", "_thumbnail.jpg", "_cover.jpg", "_miniatura.json", "_video_ia.json")
 _VIDEO_NAME_RE = re.compile(r"^(.+?)(_short\d+)?_(?:music_)?reel\.mp4$")
 
 
@@ -567,6 +573,42 @@ def regenerar_miniaturas(filename: str):
 @app.get("/api/output/{filename}/miniaturas")
 def estado_miniaturas(filename: str):
     return _miniaturas_jobs.get(filename, {"estado": "sin_job"})
+
+
+_video_ia_jobs: dict[str, dict] = {}
+
+
+@app.post("/api/output/{filename}/video-ia")
+def pasar_a_video_ia(filename: str):
+    """Rehace un reel narrado con fondos de vídeo IA en movimiento (Flux + LTX
+    en local), reutilizando su guion y su voz. En segundo plano (~15 min); el
+    reel anterior queda como copia oculta .<slug>.rapido.mp4."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nombre de archivo invalido")
+    if not (OUTPUT_DIR / filename).exists():
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+    if _video_ia_jobs.get(filename, {}).get("estado") == "generando":
+        return _video_ia_jobs[filename]
+
+    def _job():
+        # Proceso aparte: MoviePy y la espera a ComfyUI no bloquean la API
+        r = subprocess.run([sys.executable, "-u", str(CORE_DIR / "video_ia.py"), filename],
+                           capture_output=True, text=True, cwd=str(CORE_DIR))
+        if r.returncode == 0:
+            _video_ia_jobs[filename] = {"estado": "ok"}
+        else:
+            ultimas = [ln for ln in (r.stderr or r.stdout).strip().splitlines() if ln.strip()][-1:]
+            _video_ia_jobs[filename] = {"estado": "error", "error": ultimas[0] if ultimas else "falló"}
+        print(f"[video-ia] {filename}: {_video_ia_jobs[filename]}")
+
+    _video_ia_jobs[filename] = {"estado": "generando"}
+    threading.Thread(target=_job, daemon=True).start()
+    return _video_ia_jobs[filename]
+
+
+@app.get("/api/output/{filename}/video-ia")
+def estado_video_ia(filename: str):
+    return _video_ia_jobs.get(filename, {"estado": "sin_job"})
 
 
 @app.delete("/api/output/{filename}")

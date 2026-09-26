@@ -198,6 +198,13 @@ def _fondos(concepto: dict, imagenes: list[str], url_articulo: str | None,
             tmp: Path) -> tuple[Image.Image | None, Image.Image | None, str]:
     """(fondo vertical, fondo horizontal, origen)."""
     p = concepto["prompt_imagen"] + ", vibrant saturated colors, high contrast, striking, epic"
+    from video_ia import bloqueo_gpu
+    with bloqueo_gpu("portada"):
+        return _fondos_flux(p, imagenes, url_articulo, tmp)
+
+
+def _fondos_flux(p: str, imagenes: list[str], url_articulo: str | None,
+                 tmp: Path) -> tuple[Image.Image | None, Image.Image | None, str]:
     v = _flux(p + ", vertical composition, main subject large in the lower half of the frame, "
               "clean dark negative space in the upper third", 768, 1344, tmp / "v.png")
     if v:

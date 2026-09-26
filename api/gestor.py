@@ -3,6 +3,7 @@ api/gestor.py
 Gestor de generación y publicación automatizada de reels.
 """
 import email.utils
+import os
 import json
 import re
 import threading
@@ -148,6 +149,8 @@ class GenerateOverrides(BaseModel):
     mostrar_titulo: Optional[bool] = None    # None = usar prefs
     mostrar_subtitulos: Optional[bool] = None
     largo: bool = False                      # True = video largo 7-10 min (4 actos)
+    video_ia: Optional[bool] = None          # None = según viralidad (VIDEO_IA_UMBRAL)
+    portada_ia: Optional[bool] = None
 
 
 class YoutubeUrlRequest(BaseModel):
@@ -347,6 +350,18 @@ def _build_generate_payload(item: dict, overrides: dict = None) -> dict:
         "volumen_voz":        p["volumen_voz"],
         "largo":              ov.get("largo", False),
     }
+
+    # Solo las noticias más virales (score ≥ VIDEO_IA_UMBRAL, def. 7.5) salen con
+    # vídeo IA en movimiento + portada IA (~15-20 min); el resto, en modo rápido,
+    # y se pueden pasar a vídeo IA después desde la lista de vídeos.
+    try:
+        umbral = float(os.environ.get("VIDEO_IA_UMBRAL", "7.5"))
+    except ValueError:
+        umbral = 7.5
+    score = float(item.get("score_noticia") or 0)
+    premium = score >= umbral and not base["largo"]
+    base["video_ia"] = ov.get("video_ia", premium)
+    base["portada_ia"] = ov.get("portada_ia", premium)
 
     def _is_youtube(url: str) -> bool:
         return "youtube.com/watch" in url or "youtu.be/" in url

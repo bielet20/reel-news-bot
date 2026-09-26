@@ -453,12 +453,39 @@ def _clip_avatar(ruta_video: str, duracion_total: float,
         return None
 
 
+def _clip_video_fondo(ruta: str, dur: float, util_max: float = 3.4):
+    """Clip de vídeo (p. ej. generado con LTX) como fondo de una escena.
+    Solo usa los primeros `util_max` s (los modelos pequeños pierden coherencia
+    al final) y los estira a `dur` con cámara lenta suave (máx. 1,6×); si aun así
+    se queda corto, el último fotograma se congela."""
+    from moviepy.editor import VideoFileClip
+    v = VideoFileClip(ruta, audio=False)
+    util = min(v.duration, util_max)
+    v = v.subclip(0, util)
+    escala = max(ANCHO / v.w, ALTO / v.h)
+    v = v.resize(escala).crop(x_center=v.w * escala / 2, y_center=v.h * escala / 2,
+                              width=ANCHO, height=ALTO)
+    if dur > util:
+        factor = min(dur / util, 1.6)
+        v = v.fx(vfx.speedx, 1 / factor)
+        if v.duration < dur:
+            v = v.fx(vfx.freeze, t="end", freeze_duration=dur - v.duration)
+    return v.set_duration(dur).set_position("center")
+
+
 def _crear_fondo_clip_desde_imagenes(rutas: list, duracion_total: float):
-    """Slideshow con Ken Burns: cada imagen ocupa duracion_total/n segundos."""
+    """Slideshow con Ken Burns: cada imagen ocupa duracion_total/n segundos.
+    Admite también vídeos (.mp4/.webm/.mov) como fondo en movimiento."""
     from moviepy.editor import concatenate_videoclips
     dur_por_img = duracion_total / len(rutas)
     clips = []
     for ruta in rutas:
+        if str(ruta).lower().endswith((".mp4", ".webm", ".mov")):
+            try:
+                clips.append(_clip_video_fondo(ruta, dur_por_img))
+            except Exception as e:
+                print(f"[WARN] No se pudo cargar vídeo {ruta}: {e}")
+            continue
         try:
             img = Image.open(ruta).convert("RGB")
             # Recortar/redimensionar al tamaño del video

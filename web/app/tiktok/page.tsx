@@ -303,7 +303,7 @@ function TikTokPage() {
   const agree = disclose && branded ? t.agreeBranded : t.agreeMusic;
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", padding: "32px 16px 64px" }}>
+    <div style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px 64px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>{t.title}</h1>

@@ -460,9 +460,21 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
         else:
             print("   [WARN] No se pudo generar avatar, continuando sin él.")
 
+    # Fondos de VÍDEO IA en movimiento (Flux + LTX en local) si se pidió
+    # (--video-ia / VIDEO_IA=1). Si falla, el reel sigue con las imágenes.
+    fondos = imgs_fondo
+    if os.environ.get("VIDEO_IA") == "1" and not largo:
+        print("-> Generando fondos de vídeo IA en movimiento (tarda ~15 min)...")
+        try:
+            from video_ia import generar_clips
+            fondos = generar_clips(guion.get("guion", ""), min(dur, duracion_maxima),
+                                   os.path.join(carpeta_imgs, "video_ia")) or imgs_fondo
+        except Exception as e:
+            print(f"   [WARN] Vídeo IA no disponible ({e}); sigo con imágenes")
+
     print("-> Generando video vertical...")
     construir_video(guion, ruta_audio, ruta_video, tema=tema, duracion_maxima=duracion_maxima,
-                    imagenes=imgs_fondo if imgs_fondo else None,
+                    imagenes=fondos if fondos else None,
                     ruta_avatar=ruta_avatar_video,
                     marca=marca,
                     mostrar_titulo=mostrar_titulo,
@@ -1221,6 +1233,9 @@ def main():
                         help="Pais para tendencias (codigo ISO: AR, US, ES, MX, CO ...). "
                              "Se usa con --trending y --trending-yt. Por defecto: AR.")
     # --- Opciones generales ---
+    parser.add_argument("--video-ia", action="store_true",
+                        help="Fondos de vídeo en movimiento generados en local (Flux + LTX). "
+                             "Tarda ~15 min más por reel.")
     parser.add_argument("--portada-ia", action="store_true",
                         help="Genera portada vertical + miniatura con IA local (LM Studio + Flux). "
                              "Tarda 3-6 min más por reel; sin esto, miniatura rápida.")
@@ -1233,6 +1248,8 @@ def main():
     args = parser.parse_args()
     if args.portada_ia:
         os.environ["MINIATURAS_MODO"] = "completa"
+    if args.video_ia:
+        os.environ["VIDEO_IA"] = "1"
 
     generados = []
 

@@ -80,7 +80,7 @@ export default function MusicPage() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)", padding: "24px 20px", maxWidth: 700, margin: "0 auto" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)", padding: "24px 20px", maxWidth: 1000, margin: "0 auto" }}>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
         <a href="/" style={{ color: "var(--muted)", textDecoration: "none", fontSize: 13 }}>← Volver</a>

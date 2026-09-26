@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import ZoomControl from "./components/ZoomControl";
 
 export const metadata: Metadata = {
   title: "Reel News Bot",
@@ -23,13 +24,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           display: "flex",
           alignItems: "center",
           gap: 4,
-          height: 48,
+          height: 56,
           position: "sticky",
           top: 0,
           zIndex: 100,
         }}>
           <Link href="/" style={{
-            fontSize: 14,
+            fontSize: 16,
             fontWeight: 700,
             color: "var(--accent)",
             textDecoration: "none",
@@ -45,6 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <NavLink href="/library">Biblioteca</NavLink>
           <NavLink href="/music">Música</NavLink>
           <NavLink href="/settings">Settings</NavLink>
+          <ZoomControl />
         </nav>
         {children}
       </body>
@@ -55,10 +57,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link href={href} style={{
-      fontSize: 13,
-      color: "var(--muted)",
+      fontSize: 15,
+      color: "var(--text)",
       textDecoration: "none",
-      padding: "6px 10px",
+      padding: "8px 12px",
       borderRadius: 7,
     }}>
       {children}

@@ -1656,7 +1656,7 @@ export default function GestorPage() {
   const unreadCount = notifs.filter((n) => !n.leido).length;
 
   return (
-    <main style={{ maxWidth: 860, margin: "0 auto", padding: "28px 16px 60px" }}>
+    <main style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 16px 60px" }}>
       {/* ── HEADER ── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>
         <div>

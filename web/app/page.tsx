@@ -99,6 +99,7 @@ export default function Home() {
   const [tipoContenido, setTipoContenido] = useState<"noticia" | "curiosidad">("noticia");
   const [subirYoutube, setSubirYoutube] = useState(false);
   const [portadaIa, setPortadaIa] = useState(false);
+  const [videoIa, setVideoIa] = useState(false);
   const [ytCredOk, setYtCredOk] = useState<boolean | null>(null);
   const [ytCanal, setYtCanal] = useState("");
   const [cantidad, setCantidad] = useState(1);
@@ -256,6 +257,16 @@ export default function Home() {
         ],
       },
       {
+        title: "Fondo del vídeo",
+        items: [
+          {
+            label: videoIa ? "Vídeo IA en movimiento (~15 min)" : "Imágenes (rápido)",
+            active: videoIa,
+            onToggle: () => setVideoIa((v) => !v),
+          },
+        ],
+      },
+      {
         title: "Miniaturas",
         items: [
           {
@@ -357,6 +368,7 @@ export default function Home() {
     body.tipo_contenido = tipoContenido;
     body.subir_youtube  = subirYoutube;
     body.portada_ia     = portadaIa;
+    body.video_ia       = videoIa;
 
     try {
       const res = await fetch("/api/generate", {
@@ -477,7 +489,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen px-4 py-10">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         <div className="mb-10 text-center">
           <h1 className="text-3xl font-bold mb-2" style={{ color: "var(--accent)" }}>
             Reel News Bot
@@ -797,6 +809,19 @@ export default function Home() {
                 placeholder="ej: @micanal — vacío = sin marca"
               />
             </Field>
+
+            {/* ── Fondo del vídeo ──────────────────────────────────── */}
+            <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>Fondo del vídeo</p>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <Toggle value={videoIa} onChange={setVideoIa} />
+                <span style={{ fontSize: 13, color: videoIa ? "var(--text)" : "var(--muted)" }}>
+                  {videoIa
+                    ? "Vídeo IA en movimiento: escenas de la noticia pintadas con Flux y animadas con LTX, en local (~15 min)"
+                    : "Imágenes (rápido). El vídeo IA se puede aplicar después desde la lista"}
+                </span>
+              </label>
+            </div>
 
             {/* ── Miniaturas ───────────────────────────────────────── */}
             <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>

@@ -10,6 +10,8 @@ interface VideoFile {
   size: number;
   modified: string;
   cover?: string | null;
+  video_ia?: boolean;
+  narrado?: boolean;
 }
 
 export default function RecentVideos() {
@@ -21,6 +23,8 @@ export default function RecentVideos() {
   // Portada IA bajo demanda (Flux tarda unos minutos): filename -> generando
   const [portadas, setPortadas] = useState<Record<string, "generando" | "error">>({});
   const [coverVer, setCoverVer] = useState(0);
+  // Pasar a vídeo IA bajo demanda (~15 min): filename -> estado
+  const [videoIa, setVideoIa] = useState<Record<string, "generando" | "error">>({});
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -82,6 +86,29 @@ export default function RecentVideos() {
       setPortadas((p) => { const n = { ...p }; delete n[filename]; return n; });
     } catch {
       setPortadas((p) => ({ ...p, [filename]: "error" }));
+    }
+  }
+
+  async function pasarAVideoIa(filename: string) {
+    if (!confirm("¿Rehacer este reel con vídeo IA en movimiento? Tarda unos 15 minutos y usa la GPU. " +
+                 "Se guarda una copia del reel actual.")) return;
+    setVideoIa((p) => ({ ...p, [filename]: "generando" }));
+    try {
+      const url = `/api/output/${encodeURIComponent(filename)}/video-ia`;
+      const r = await fetch(url, { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 15000));
+        const s = await fetch(url).then((x) => x.json());
+        if (s.estado === "generando") continue;
+        if (s.estado !== "ok") throw new Error(s.error || s.estado);
+        break;
+      }
+      setVideos(await fetch("/api/output").then((x) => x.json()));
+      setVideoIa((p) => { const n = { ...p }; delete n[filename]; return n; });
+    } catch (e) {
+      setVideoIa((p) => ({ ...p, [filename]: "error" }));
+      alert(`No se pudo pasar a vídeo IA: ${e instanceof Error ? e.message : e}`);
     }
   }
 
@@ -166,10 +193,28 @@ export default function RecentVideos() {
                 </p>
                 <p className="text-xs" style={{ color: "var(--muted)" }}>
                   {fmtDate(v.modified)} · {fmt(v.size)}
+                  {v.video_ia && <span style={{ color: "#34d399", marginLeft: 6 }}>· 🎬 vídeo IA</span>}
                 </p>
               </div>
             </div>
             <div className="flex gap-2 ml-3 shrink-0">
+              {v.narrado && !v.video_ia && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (videoIa[v.filename] !== "generando") pasarAVideoIa(v.filename); }}
+                  disabled={videoIa[v.filename] === "generando"}
+                  title="Rehacer el reel con escenas en movimiento generadas en local (Flux + LTX). Unos 15 min."
+                  className="text-xs px-3 py-1.5 rounded-lg"
+                  style={{
+                    background: "var(--surface2)", border: "1px solid var(--border)",
+                    color: videoIa[v.filename] === "error" ? "#f87171" : "#34d399",
+                    cursor: videoIa[v.filename] === "generando" ? "wait" : "pointer",
+                    opacity: videoIa[v.filename] === "generando" ? 0.7 : 1,
+                  }}
+                >
+                  {videoIa[v.filename] === "generando" ? "⏳ Vídeo IA (~15 min)…"
+                    : videoIa[v.filename] === "error" ? "⚠ Reintentar vídeo IA" : "🎬 Vídeo IA"}
+                </button>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); if (!portadas[v.filename] || portadas[v.filename] === "error") crearPortada(v.filename); }}
                 disabled={portadas[v.filename] === "generando"}
