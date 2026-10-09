@@ -180,6 +180,12 @@ def youtube_connect():
 
 @router.get("/api/accounts/youtube/callback")
 def youtube_callback(code: str = None, state: str = None, error: str = None):
+    # Cuentas del Centro de Redes: mismo redirect de Google, otro destino
+    destino = _oauth_state.get(state) if state else None
+    if isinstance(destino, dict):
+        _oauth_state.pop(state, None)
+        from api.redes import completar_youtube
+        return completar_youtube(destino, code, error)
     if error:
         return RedirectResponse(f"{FRONTEND}/canales?error=youtube_{error}")
     if not code or not state or _oauth_state.get(state) != "youtube":
@@ -244,7 +250,13 @@ def youtube_callback(code: str = None, state: str = None, error: str = None):
 
 
 def _tiktok_status() -> dict:
-    """TikTok connection status: cookies file > OAuth token."""
+    """TikTok connection status: servicio api.bieninforma2.site > cookies > OAuth token."""
+    try:
+        from api.tiktok_post import servicio_conectado
+        if servicio_conectado():
+            return {"connected": True, "display_name": "TikTok (api.bieninforma2.site)", "method": "service"}
+    except Exception:
+        pass
     cookies_path = Path(__file__).parent.parent / "_config" / "tiktok_cookies.json"
     if cookies_path.exists():
         try:

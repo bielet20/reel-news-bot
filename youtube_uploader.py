@@ -60,21 +60,30 @@ SCOPES = [
 _CAT_NOTICIAS = "25"      # News & Politics
 _CAT_EDUCACION = "27"     # Education (curiosidades)
 
-# Cache de IDs de playlists para no llamar a la API repetidamente
-_playlist_cache: dict[str, str] = {}
+# Cache de IDs de playlists para no llamar a la API repetidamente.
+# Clave (token, nombre): cada canal tiene sus propias playlists.
+_playlist_cache: dict[tuple[str, str], str] = {}
 
 _TOKENS_FILE = Path(__file__).parent / "_tokens" / "youtube.json"
 
-# Cache del servicio para no refrescar token en cada llamada
-_service_cache: dict = {"service": None, "expires_at": 0}
+# Cache del servicio por fichero de token (un canal = un token), para no
+# refrescar el token en cada llamada.
+_service_cache: dict[str, dict] = {}
 
 
-def _load_credentials() -> tuple[str, str, str, str | None]:
+def _clave_token(token_file: Path | None) -> str:
+    return str(Path(token_file or _TOKENS_FILE).resolve())
+
+
+def _load_credentials(token_file: Path | None = None) -> tuple[str, str, str, str | None]:
     """Devuelve (client_id, client_secret, refresh_token, access_token|None).
-    Prioriza _tokens/youtube.json (OAuth web) sobre las variables de entorno."""
-    if _TOKENS_FILE.exists():
+    Sin token_file: _tokens/youtube.json (Bieninforma2) y, si no, el .env.
+    Con token_file (otro canal del Centro de Redes): solo ese fichero."""
+    token_file = Path(token_file) if token_file else None
+    fichero = token_file or _TOKENS_FILE
+    if fichero.exists():
         try:
-            data = json.loads(_TOKENS_FILE.read_text(encoding="utf-8"))
+            data = json.loads(fichero.read_text(encoding="utf-8"))
             client_id     = data.get("client_id") or os.environ.get("YOUTUBE_CLIENT_ID")
             client_secret = data.get("client_secret") or os.environ.get("YOUTUBE_CLIENT_SECRET")
             refresh_token = data.get("refresh_token")
@@ -83,6 +92,12 @@ def _load_credentials() -> tuple[str, str, str, str | None]:
                 return client_id, client_secret, refresh_token, access_token
         except Exception:
             pass
+
+    if token_file is not None and token_file.resolve() != _TOKENS_FILE.resolve():
+        raise RuntimeError(
+            f"El canal no está conectado ({fichero.name} sin autorización). "
+            "Conéctalo en el Centro de Redes."
+        )
 
     client_id     = os.environ.get("YOUTUBE_CLIENT_ID")
     client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET")
@@ -97,16 +112,19 @@ def _load_credentials() -> tuple[str, str, str, str | None]:
     return client_id, client_secret, refresh_token, None
 
 
-def _get_service():
-    """Devuelve el cliente de YouTube, reutilizando el service si el token sigue vigente."""
+def _get_service(token_file: Path | None = None):
+    """Devuelve el cliente de YouTube del canal, reutilizándolo si el token sigue vigente."""
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
 
-    if _service_cache["service"] and time.time() < _service_cache["expires_at"]:
-        return _service_cache["service"]
+    clave = _clave_token(token_file)
+    cache = _service_cache.get(clave)
+    if cache and time.time() < cache["expires_at"]:
+        return cache["service"]
 
-    client_id, client_secret, refresh_token, access_token = _load_credentials()
+    client_id, client_secret, refresh_token, access_token = _load_credentials(token_file)
+    fichero = Path(token_file) if token_file else _TOKENS_FILE
 
     creds = Credentials(
         token=access_token,
@@ -119,29 +137,48 @@ def _get_service():
 
     if not creds.valid:
         creds.refresh(Request())
-        if _TOKENS_FILE.exists():
+        if fichero.exists():
             try:
-                data = json.loads(_TOKENS_FILE.read_text(encoding="utf-8"))
+                data = json.loads(fichero.read_text(encoding="utf-8"))
                 data["access_token"] = creds.token
-                _TOKENS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                fichero.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
             except Exception:
                 pass
 
     service = build("youtube", "v3", credentials=creds)
     expiry = creds.expiry.timestamp() - 60 if creds.expiry else time.time() + 3540
-    _service_cache.update({"service": service, "expires_at": expiry})
+    _service_cache[clave] = {"service": service, "expires_at": expiry}
     return service
 
 
-def invalidate_service_cache():
-    """Limpia el cache del servicio (llamar tras reconectar la cuenta)."""
-    _service_cache.update({"service": None, "expires_at": 0})
+def invalidate_service_cache(token_file: Path | None = None):
+    """Limpia el cache del servicio (llamar tras reconectar la cuenta).
+    Sin argumento limpia todos los canales."""
+    if token_file is None:
+        _service_cache.clear()
+    else:
+        _service_cache.pop(_clave_token(token_file), None)
 
 
-def _playlist_id(service, nombre: str, descripcion: str = "") -> str:
+def canal_del_token(token_file: Path | None = None) -> dict:
+    """Canal real al que pertenece un token: {channel_id, titulo, custom_url}."""
+    resp = _get_service(token_file).channels().list(part="snippet", mine=True).execute()
+    items = resp.get("items") or []
+    if not items:
+        raise RuntimeError("La cuenta de Google autorizada no tiene canal de YouTube.")
+    snip = items[0]["snippet"]
+    return {
+        "channel_id": items[0]["id"],
+        "titulo": snip.get("title", ""),
+        "custom_url": snip.get("customUrl", ""),
+    }
+
+
+def _playlist_id(service, nombre: str, descripcion: str = "", token_file: Path | None = None) -> str:
     """Devuelve el ID de una playlist por nombre, creándola si no existe."""
-    if nombre in _playlist_cache:
-        return _playlist_cache[nombre]
+    clave = (_clave_token(token_file), nombre)
+    if clave in _playlist_cache:
+        return _playlist_cache[clave]
 
     req = service.playlists().list(part="snippet", mine=True, maxResults=50)
     while req:
@@ -149,7 +186,7 @@ def _playlist_id(service, nombre: str, descripcion: str = "") -> str:
         for item in resp.get("items", []):
             if item["snippet"]["title"] == nombre:
                 pid = item["id"]
-                _playlist_cache[nombre] = pid
+                _playlist_cache[clave] = pid
                 return pid
         req = service.playlists().list_next(req, resp)
 
@@ -161,7 +198,7 @@ def _playlist_id(service, nombre: str, descripcion: str = "") -> str:
         }
     ).execute()
     pid = resp["id"]
-    _playlist_cache[nombre] = pid
+    _playlist_cache[clave] = pid
     print(f"[YouTube] Playlist '{nombre}' creada ({pid})")
     return pid
 
@@ -219,6 +256,13 @@ def subir_video(
     attribution: dict | None = None,
     tags_extra: list[str] | None = None,
     thumbnail_path: str | None = None,
+    token_file: Path | None = None,
+    categoria_id: str | None = None,
+    descripcion_override: str | None = None,
+    exigir_channel_id: str | None = None,
+    playlist: str | None = "",
+    tags: list[str] | None = None,
+    privacidad: str = "public",
 ) -> dict:
     """
     Sube un video MP4 a YouTube y lo añade a la playlist correspondiente.
@@ -229,6 +273,10 @@ def subir_video(
         tipo:       "noticia" o "curiosidad".
         attribution: Dict con fuente, autor, fecha, url_original (opcional).
         tags_extra: Lista adicional de tags.
+        token_file: token del canal (Centro de Redes). None = Bieninforma2.
+        categoria_id / descripcion_override / tags: sustituyen a los de noticias.
+        exigir_channel_id: si el token es de otro canal, NO sube (error).
+        playlist: "" = la de noticias/curiosidades; None = ninguna; otro = esa.
 
     Returns:
         {"video_id": str, "url": str, "playlist_id": str | None}
@@ -243,13 +291,24 @@ def subir_video(
         from thumbnail_maker import portadas_de
         thumbnail_path = portadas_de(video_path)["thumbnail"]
 
-    service = _get_service()
+    service = _get_service(token_file)
 
-    categoria    = _CAT_NOTICIAS if tipo == "noticia" else _CAT_EDUCACION
-    descripcion  = _descripcion(titulo, tipo, attribution)
-    tags_base    = (["noticias", "reelnews", "ultimahora", "informacion"]
-                    if tipo == "noticia"
-                    else ["curiosidades", "sabíasque", "datos", "aprende"])
+    if exigir_channel_id:
+        real = canal_del_token(token_file)
+        if real["channel_id"] != exigir_channel_id:
+            raise RuntimeError(
+                f"El token es del canal «{real['titulo']}», no del canal elegido. "
+                "No se sube nada: reconecta la cuenta correcta en el Centro de Redes."
+            )
+
+    categoria    = categoria_id or (_CAT_NOTICIAS if tipo == "noticia" else _CAT_EDUCACION)
+    descripcion  = descripcion_override or _descripcion(titulo, tipo, attribution)
+    if tags is None:
+        tags_base = (["noticias", "reelnews", "ultimahora", "informacion"]
+                     if tipo == "noticia"
+                     else ["curiosidades", "sabíasque", "datos", "aprende"])
+    else:
+        tags_base = list(tags)
     tags         = (tags_base + (tags_extra or []))[:500]
 
     body = {
@@ -262,7 +321,7 @@ def subir_video(
             "defaultAudioLanguage": "es",
         },
         "status": {
-            "privacyStatus":            "public",
+            "privacyStatus":            privacidad,
             "selfDeclaredMadeForKids":  False,
         },
     }
@@ -305,15 +364,20 @@ def subir_video(
             print(f"[YouTube][WARN] No se pudo subir miniatura: {e}")
 
     # Añadir a la playlist
-    playlist_nombre = "Últimas Noticias" if tipo == "noticia" else "Curiosidades"
-    playlist_desc   = (
-        "Las últimas noticias verificadas en menos de 60 segundos."
-        if tipo == "noticia"
-        else "Datos curiosos e interesantes que quizás no conocías."
-    )
+    if playlist is None:
+        return {"video_id": video_id, "url": video_url, "playlist_id": None}
+    if playlist:
+        playlist_nombre, playlist_desc = playlist, ""
+    else:
+        playlist_nombre = "Últimas Noticias" if tipo == "noticia" else "Curiosidades"
+        playlist_desc   = (
+            "Las últimas noticias verificadas en menos de 60 segundos."
+            if tipo == "noticia"
+            else "Datos curiosos e interesantes que quizás no conocías."
+        )
     playlist_id = None
     try:
-        playlist_id = _playlist_id(service, playlist_nombre, playlist_desc)
+        playlist_id = _playlist_id(service, playlist_nombre, playlist_desc, token_file)
         service.playlistItems().insert(
             part="snippet",
             body={
