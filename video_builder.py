@@ -235,6 +235,38 @@ def _dibujar_texto_con_sombra(draw, texto, font, x, y, color=(255, 255, 255, 255
     draw.text((x, y), texto, font=font, fill=color)
 
 
+def _ajustar_lineas(draw, texto, font_path, tam_fuente, max_ancho, max_lineas, tam_fuente_min):
+    """Reparte el texto en líneas bajando la fuente hasta que quepa en max_lineas."""
+    font = ImageFont.truetype(font_path, tam_fuente)
+    lineas = _envolver_texto(draw, texto, font, max_ancho)
+    while len(lineas) > max_lineas and tam_fuente > tam_fuente_min:
+        tam_fuente -= 4
+        font = ImageFont.truetype(font_path, tam_fuente)
+        lineas = _envolver_texto(draw, texto, font, max_ancho)
+    return font, lineas, tam_fuente
+
+
+def alto_texto(texto: str, font_path: str, tam_fuente: int, max_ancho: int = 920,
+               max_lineas: int = 6, tam_fuente_min: int = 34) -> int:
+    """Alto en píxeles que ocupa _frame_texto con los mismos parámetros."""
+    draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    _, lineas, tam = _ajustar_lineas(draw, texto, font_path, tam_fuente,
+                                     max_ancho, max_lineas, tam_fuente_min)
+    return (tam + 16) * len(lineas)
+
+
+def clip_fecha(dia: str, y_centro: int, duracion: float):
+    """Rótulo con la fecha de la noticia ('7 de octubre de 2026'), en ámbar para
+    que no se confunda con el título. None si no hay fecha."""
+    from fecha_noticia import larga
+    texto = larga(dia)
+    if not texto:
+        return None
+    img = _frame_texto(texto, FONT_BOLD, 40, y_centro=y_centro, max_ancho=900,
+                       color_texto=(255, 204, 0, 255), max_lineas=1)
+    return ImageClip(np.array(img)).set_duration(duracion)
+
+
 def _frame_texto(texto: str, font_path: str, tam_fuente: int, y_centro: int,
                   max_ancho: int = 920, color_texto=(255, 255, 255, 255),
                   con_fondo=False, max_lineas: int = 6, tam_fuente_min: int = 34) -> Image.Image:
@@ -242,12 +274,8 @@ def _frame_texto(texto: str, font_path: str, tam_fuente: int, y_centro: int,
     img = Image.new("RGBA", (ANCHO, ALTO), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    font = ImageFont.truetype(font_path, tam_fuente)
-    lineas = _envolver_texto(draw, texto, font, max_ancho)
-    while len(lineas) > max_lineas and tam_fuente > tam_fuente_min:
-        tam_fuente -= 4
-        font = ImageFont.truetype(font_path, tam_fuente)
-        lineas = _envolver_texto(draw, texto, font, max_ancho)
+    font, lineas, tam_fuente = _ajustar_lineas(draw, texto, font_path, tam_fuente,
+                                               max_ancho, max_lineas, tam_fuente_min)
 
     alturas_linea = tam_fuente + 16
     alto_total = alturas_linea * len(lineas)
@@ -520,12 +548,15 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
                      musica_fondo: str = None,
                      volumen_musica: float = 0.3,
                      volumen_voz: float = 1.0,
-                     texto_personalizado: str = None) -> str:
+                     texto_personalizado: str = None,
+                     fecha_noticia: str = "") -> str:
     """
     Genera el mp4 final. guion viene de summarizer.generar_guion_reel().
     ruta_audio es el mp3/wav generado por tts.generar_audio().
     imagenes: lista de rutas de imágenes locales para usar como fondo (slideshow).
               Si es None o vacía, usa el fondo procedural/Pexels.
+    fecha_noticia: 'YYYY-MM-DD' (fecha_noticia.normalizar); se rotula debajo del
+                   título, o arriba si el título no se muestra.
     """
     audio_clip = AudioFileClip(ruta_audio)
     duracion_audio = min(audio_clip.duration, duracion_maxima)
@@ -625,9 +656,16 @@ def construir_video(guion: dict, ruta_audio: str, ruta_salida: str,
     else:
         marca_clip = []
 
+    if mostrar_titulo:
+        y_fecha = 210 + alto_texto(guion["titulo"], FONT_EXTRABOLD, 62, max_ancho=960) // 2 + 40
+    else:
+        y_fecha = 150
+    fecha_clip = clip_fecha(fecha_noticia, y_fecha, duracion_audio)
+
     capas = (
         [fondo_clip]
         + ([titulo_clip] if mostrar_titulo else [])
+        + ([fecha_clip] if fecha_clip else [])
         + clips_subtitulos
         + avatar_clips
         + texto_pers_clips

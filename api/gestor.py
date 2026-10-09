@@ -393,6 +393,8 @@ def _build_generate_payload(item: dict, overrides: dict = None) -> dict:
             noticia = json.loads(contenido)
         except Exception:
             noticia = {}
+        # Fecha del feed: se rotula en el vídeo si el artículo no trae la suya
+        base["fecha_noticia"] = noticia.get("fecha") or None
         link = noticia.get("link", "")
         tit = noticia.get("titulo", titulo)
         fuente = noticia.get("fuente", "")

@@ -53,6 +53,26 @@ def enviar_mensaje(texto: str, chat_id: str = None) -> dict:
     return {"ok": True, "message_id": data["result"]["message_id"]}
 
 
+CAPTION_MAX = 1024  # límite de Telegram para el texto de un vídeo (en UTF-16)
+
+
+def _largo_tg(texto: str) -> int:
+    return len(texto.encode("utf-16-le")) // 2
+
+
+def recortar_caption(caption: str, maximo: int = CAPTION_MAX) -> str:
+    """Telegram rechaza el vídeo entero ("message caption is too long") si el
+    texto se pasa: se corta por el último salto de línea que quepa."""
+    if _largo_tg(caption) <= maximo:
+        return caption
+    corte = caption[:maximo]
+    while _largo_tg(corte) > maximo - 1:
+        corte = corte[:-1]
+    if "\n" in corte[len(corte) // 2:]:
+        corte = corte[:corte.rfind("\n")]
+    return corte.rstrip() + "…"
+
+
 def subir_video(video_path: str, caption: str = "", chat_id: str = None) -> dict:
     """Envía un video a un chat/canal de Telegram.
 
@@ -71,7 +91,7 @@ def subir_video(video_path: str, caption: str = "", chat_id: str = None) -> dict
     with open(video_path, "rb") as f:
         resp = requests.post(
             url,
-            data={"chat_id": target, "caption": caption, "supports_streaming": "true"},
+            data={"chat_id": target, "caption": recortar_caption(caption), "supports_streaming": "true"},
             files={"video": (Path(video_path).name, f, "video/mp4")},
             timeout=300,
         )

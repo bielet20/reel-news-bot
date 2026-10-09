@@ -258,6 +258,7 @@ def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
         "fuentes_detalle": noticia.get("fuentes_detalle") or [],
         "n_fuentes": noticia.get("n_fuentes", 1),
         "confirmada": bool(noticia.get("confirmada")),
+        "fecha_noticia": _dia_de_noticia(noticia, at),
         "extraido_en": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -287,7 +288,11 @@ def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
     if descripcion_art and not _es_texto_en_espanol(descripcion_art):
         descripcion_art = guion_texto or ""
 
-    lineas = [titulo, ""]
+    from fecha_noticia import linea as _linea_fecha
+    lineas = [titulo]
+    if fuente_completa["fecha_noticia"]:
+        lineas.append(_linea_fecha(fuente_completa["fecha_noticia"]))
+    lineas.append("")
 
     if descripcion_art:
         lineas += [descripcion_art, ""]
@@ -339,6 +344,15 @@ def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
 
     print(f"   Atribución guardada: {ruta_fuente}")
     return fuente_completa
+
+
+def _dia_de_noticia(noticia: dict, atribucion: dict = None) -> str:
+    """Día de la noticia ('YYYY-MM-DD'): la del propio artículo si la trae, si no
+    la del feed/escáner (--fecha-noticia, que manda el gestor) o la del dict."""
+    from fecha_noticia import normalizar
+    return (normalizar((atribucion or {}).get("fecha_publicacion"))
+            or normalizar(os.environ.get("FECHA_NOTICIA"))
+            or normalizar(noticia.get("fecha")))
 
 
 def _ajustar_audio_a_duracion(ruta_audio: str, dur: float, duracion_maxima: int) -> float:
@@ -544,8 +558,10 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
         except Exception as e:
             print(f"   [WARN] Vídeo IA no disponible ({e}); sigo con imágenes")
 
-    print("-> Generando video vertical...")
+    dia_noticia = _dia_de_noticia(noticia, atribucion)
+    print(f"-> Generando video vertical... (fecha de la noticia: {dia_noticia or 'desconocida'})")
     construir_video(guion, ruta_audio, ruta_video, tema=tema, duracion_maxima=duracion_maxima,
+                    fecha_noticia=dia_noticia,
                     imagenes=fondos if fondos else None,
                     ruta_avatar=ruta_avatar_video,
                     marca=marca,
@@ -736,7 +752,10 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
             ) from e
 
     fuente = datos["canal"] or "YouTube"
-    print(f"   Titulo: {datos['titulo']}  (canal: {fuente})")
+    from fecha_noticia import normalizar as _normalizar_fecha
+    datos["fecha"] = (_normalizar_fecha(os.environ.get("FECHA_NOTICIA"))
+                      or _normalizar_fecha(datos.get("fecha")))
+    print(f"   Titulo: {datos['titulo']}  (canal: {fuente}, fecha: {datos['fecha'] or 'desconocida'})")
 
     from summarizer import _es_texto_en_espanol
     if modo == "clip" and not _es_texto_en_espanol(datos["texto"]):
@@ -773,6 +792,8 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
                     f.write(f"Titulo: {resultado['titulo']}\n")
                     f.write(f"Canal: {fuente}\n")
                     f.write(f"Link: {datos['url']}\n")
+                    if datos["fecha"]:
+                        f.write(f"Fecha: {datos['fecha']}\n")
                     f.write(f"Tramo recortado: {resultado['inicio']:.0f}s - "
                             f"{resultado['fin']:.0f}s ({resultado['duracion']:.0f}s)\n\n")
                     f.write(resultado["texto_segmento"])
@@ -797,6 +818,7 @@ def procesar_youtube(url: str, carpeta_salida: str = CARPETA_SALIDA,
         "link": datos["url"],
         "fuente": fuente,
         "resumen": "",
+        "fecha": datos["fecha"],
     }
     ruta = procesar_noticia(
         noticia, tema="youtube", carpeta_salida=carpeta_salida,
@@ -1318,11 +1340,16 @@ def main():
                         help="Duracion maxima del video en segundos. Por defecto: 60.")
     parser.add_argument("--largo", action="store_true",
                         help="Genera un video largo (7-10 min) con guion de 4 actos en vez de un Short.")
+    parser.add_argument("--fecha-noticia", default=None, metavar="FECHA",
+                        help="Fecha de la noticia (ISO, RSS o YYYYMMDD) si el artículo no la trae; "
+                             "se rotula en el vídeo y va en los textos publicados.")
     args = parser.parse_args()
     if args.portada_ia:
         os.environ["MINIATURAS_MODO"] = "completa"
     if args.video_ia:
         os.environ["VIDEO_IA"] = "1"
+    if args.fecha_noticia:
+        os.environ["FECHA_NOTICIA"] = args.fecha_noticia
 
     generados = []
 

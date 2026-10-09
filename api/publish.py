@@ -58,10 +58,33 @@ def publish_video(req: PublishRequest):
     return {"job_id": job_id}
 
 
+def _con_fecha_noticia(req: PublishRequest) -> PublishRequest:
+    """Mete '📅 Noticia del …' bajo el título de cada texto (petición 2026-10-07).
+    Vale también para reels generados antes del cambio: la fecha se lee de su
+    _fuente.json / _info.txt. En X solo si sigue cabiendo en 280."""
+    from fecha_noticia import con_fecha, de_reel
+    dia = de_reel(OUTPUT_DIR, req.filename)
+    if not dia:
+        return req
+    cambios = {
+        "descripcion": con_fecha(req.descripcion, dia),
+        "tiktok_caption": con_fecha(req.tiktok_caption, dia),
+        "instagram_caption": con_fecha(req.instagram_caption, dia),
+    }
+    x = con_fecha(req.x_caption, dia)
+    if len(x) <= 280:
+        cambios["x_caption"] = x
+    return req.model_copy(update=cambios)
+
+
 def _do_publish(job_id: str, req: PublishRequest, file_path: Path):
     sys.path.insert(0, str(CORE_DIR))
     results = {}
     youtube_url = ""
+    try:
+        req = _con_fecha_noticia(req)
+    except Exception as e:
+        print(f"[publish] Sin fecha de noticia en los textos: {e}")
 
     # YouTube primero para que su URL llegue al texto del canal de WA
     ordered = ["youtube"] + [p for p in req.platforms if p != "youtube"]
@@ -107,7 +130,8 @@ def _do_publish(job_id: str, req: PublishRequest, file_path: Path):
 
 def _upload_youtube(req: PublishRequest, file_path: Path) -> dict:
     from accounts_manager import load_token
-    from youtube_uploader import subir_video
+    from youtube_uploader import subir_video, _descripcion
+    from fecha_noticia import con_fecha, de_reel
 
     token = load_token("youtube")
     old_env: dict[str, Optional[str]] = {}
@@ -125,11 +149,14 @@ def _upload_youtube(req: PublishRequest, file_path: Path) -> dict:
     try:
         slug = file_path.stem.replace("_reel", "")
         thumb = OUTPUT_DIR / f"{slug}_thumbnail.jpg"
+        titulo = req.titulo or file_path.stem
+        dia = de_reel(OUTPUT_DIR, req.filename)
         resultado = subir_video(
             video_path=str(file_path),
-            titulo=req.titulo or file_path.stem,
+            titulo=titulo,
             tipo=req.tipo_contenido,
             thumbnail_path=str(thumb) if thumb.exists() else None,
+            descripcion_override=con_fecha(_descripcion(titulo, req.tipo_contenido, None), dia) if dia else None,
         )
         return {"status": "ok", "url": resultado["url"], "video_id": resultado["video_id"]}
     except Exception as e:

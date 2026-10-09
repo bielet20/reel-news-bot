@@ -216,6 +216,8 @@ class GenerateRequest(BaseModel):
     portada_ia: bool = True   # portada IA por defecto en todos los reels
     # Fondos de vídeo en movimiento con IA local (Flux + LTX): ~15 min por reel
     video_ia: bool = False
+    # Fecha de la noticia (feed/escáner) para rotularla si el artículo no la trae
+    fecha_noticia: Optional[str] = None
 
 
 def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> list:
@@ -279,6 +281,8 @@ def _build_cli_args(req: GenerateRequest, texto_tmp: Optional[str] = None) -> li
         args += ["--texto-personalizado", req.texto_personalizado.strip()]
     if req.largo:
         args += ["--largo"]
+    if req.fecha_noticia:
+        args += ["--fecha-noticia", req.fecha_noticia]
 
     return args
 

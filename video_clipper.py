@@ -35,6 +35,7 @@ from summarizer import (
 )
 from video_builder import (
     ANCHO, ALTO, FONT_BOLD, FONT_REGULAR, _frame_texto, _partir_si_es_larga,
+    alto_texto, clip_fecha,
 )
 
 ANCHO_V, ALTO_V = ANCHO, ALTO  # 1080x1920
@@ -417,6 +418,8 @@ def _escribir_reel_desde_segmento(clip_original, highlight: dict,
         datos["titulo"], FONT_BOLD, 50, y_centro=110, max_ancho=980, max_lineas=2
     )
     titulo_clip = ImageClip(np.array(titulo_img)).set_duration(duracion_clip)
+    y_fecha = 110 + alto_texto(datos["titulo"], FONT_BOLD, 50, max_ancho=980, max_lineas=2) // 2 + 30
+    fecha_clip = clip_fecha(datos.get("fecha", ""), y_fecha, duracion_clip)
 
     if mostrar_subtitulos:
         print("   -> Generando subtitulos sincronizados con el video real...")
@@ -429,7 +432,7 @@ def _escribir_reel_desde_segmento(clip_original, highlight: dict,
     video_final = None
     try:
         video_final = CompositeVideoClip(
-            [fondo, frente, titulo_clip] + clips_subs,
+            [fondo, frente, titulo_clip] + ([fecha_clip] if fecha_clip else []) + clips_subs,
             size=(ANCHO_V, ALTO_V),
         ).set_audio(subclip.audio).set_duration(duracion_clip)
 

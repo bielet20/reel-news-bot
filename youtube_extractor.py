@@ -45,7 +45,7 @@ def _metadata_desde_pagina(watch_url: str) -> dict:
         resp = requests.get(watch_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
     except Exception:
-        return {"titulo": "", "canal": ""}
+        return {"titulo": "", "canal": "", "fecha": ""}
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -67,7 +67,17 @@ def _metadata_desde_pagina(watch_url: str) -> dict:
         if m:
             canal = m.group(1)
 
-    return {"titulo": titulo, "canal": canal}
+    # Fecha de publicación del vídeo (se rotula en el reel, ver fecha_noticia.py)
+    fecha = ""
+    tag = soup.find("meta", itemprop="datePublished") or soup.find("meta", itemprop="uploadDate")
+    if tag and tag.get("content"):
+        fecha = tag["content"].strip()
+    if not fecha:
+        m = re.search(r'"(?:publishDate|uploadDate)"\s*:\s*"([^"]+)"', resp.text)
+        if m:
+            fecha = m.group(1)
+
+    return {"titulo": titulo, "canal": canal, "fecha": fecha}
 
 
 def _transcript_a_texto(fetched) -> str:
@@ -213,6 +223,7 @@ def extraer_youtube(url: str, idiomas: list = None) -> dict:
     return {
         "titulo": meta["titulo"] or f"Video {video_id}",
         "canal": meta["canal"],
+        "fecha": meta.get("fecha", ""),
         "url": watch_url,
         "video_id": video_id,
         "texto": texto,
