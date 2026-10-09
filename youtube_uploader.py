@@ -174,8 +174,10 @@ def canal_del_token(token_file: Path | None = None) -> dict:
     }
 
 
-def _playlist_id(service, nombre: str, descripcion: str = "", token_file: Path | None = None) -> str:
-    """Devuelve el ID de una playlist por nombre, creándola si no existe."""
+def _playlist_id(service, nombre: str, descripcion: str = "", token_file: Path | None = None,
+                 privacidad: str = "public") -> str:
+    """Devuelve el ID de una playlist por nombre, creándola si no existe
+    (con la privacidad dada; una que ya existe no se toca)."""
     clave = (_clave_token(token_file), nombre)
     if clave in _playlist_cache:
         return _playlist_cache[clave]
@@ -194,7 +196,7 @@ def _playlist_id(service, nombre: str, descripcion: str = "", token_file: Path |
         part="snippet,status",
         body={
             "snippet": {"title": nombre, "description": descripcion},
-            "status":  {"privacyStatus": "public"},
+            "status":  {"privacyStatus": privacidad},
         }
     ).execute()
     pid = resp["id"]
@@ -377,7 +379,10 @@ def subir_video(
         )
     playlist_id = None
     try:
-        playlist_id = _playlist_id(service, playlist_nombre, playlist_desc, token_file)
+        # una lista propia (p. ej. la de un curso) nace con la privacidad del vídeo;
+        # las de noticias/curiosidades siguen siendo públicas
+        playlist_id = _playlist_id(service, playlist_nombre, playlist_desc, token_file,
+                                   privacidad=privacidad if playlist else "public")
         service.playlistItems().insert(
             part="snippet",
             body={

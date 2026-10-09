@@ -360,7 +360,7 @@ def guardar_token_youtube(cuenta_id: str, tokens: dict, real: dict) -> dict:
 # ── Publicar ─────────────────────────────────────────────────────────────────
 
 def _publicar_youtube(ch: dict, c: dict, video: Path, titulo: str, descripcion: str,
-                      privacidad: str, miniatura: str | None) -> dict:
+                      privacidad: str, miniatura: str | None, playlist: str | None = None) -> dict:
     import youtube_uploader as yt
     cfg = ch.get("youtube") or {}
     tipo = cfg.get("tipo", "general")
@@ -378,7 +378,7 @@ def _publicar_youtube(ch: dict, c: dict, video: Path, titulo: str, descripcion: 
             categoria_id=cfg.get("categoria"),
             descripcion_override=descripcion or None,
             exigir_channel_id=c.get("channel_id"),
-            playlist=cfg.get("playlist", None),
+            playlist=playlist or cfg.get("playlist", None),
             # sin tags propios: los de noticias solo para noticias/curiosidades
             tags=cfg["tags"] if "tags" in cfg else (None if tipo in ("noticia", "curiosidad") else []),
             privacidad=privacidad,
@@ -391,10 +391,12 @@ def _publicar_youtube(ch: dict, c: dict, video: Path, titulo: str, descripcion: 
 
 def publicar(canal_id: str, video: str | Path, titulo: str, descripcion: str = "",
              redes: list[str] | None = None, privacidad: str = "public",
-             miniatura: str | None = None, origen: str = "") -> dict:
+             miniatura: str | None = None, origen: str = "",
+             playlist: str | None = None) -> dict:
     """Publica un vídeo en las redes de un canal.
 
     redes=None → todas las redes del canal que el Centro sabe publicar.
+    playlist: lista de YouTube por nombre (p. ej. la de un curso); None = la del canal.
     Devuelve {red: {"ok": bool, "url"?, "video_id"?, "error"?}}. Cada intento
     queda en el historial de publicaciones.
     """
@@ -421,7 +423,7 @@ def publicar(canal_id: str, video: str | Path, titulo: str, descripcion: str = "
             continue
         c = cuenta(disponibles[red])
         try:
-            r = _publicar_youtube(ch, c, video, titulo, descripcion, privacidad, miniatura)
+            r = _publicar_youtube(ch, c, video, titulo, descripcion, privacidad, miniatura, playlist)
             resultados[red] = {"ok": True, "cuenta": c["id"], **r}
         except RedesError as e:
             resultados[red] = {"ok": False, "cuenta": c["id"], "error": str(e)}

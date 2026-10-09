@@ -15,6 +15,7 @@ import ArbolCurso from "../components/ArbolCurso";
 import SceneInspector from "../components/SceneInspector";
 import Timeline from "../components/Timeline";
 import AjustesCurso from "../components/AjustesCurso";
+import SubirYoutube from "../components/SubirYoutube";
 import { btn, btnPrimario, etiqueta, panel } from "../components/ui";
 import AvisoServicios from "../../components/AvisoServicios";
 
@@ -68,6 +69,7 @@ export default function EditorCurso({ params }: { params: Promise<{ id: string }
   const [guardado, setGuardado] = useState<"ok" | "pendiente" | "guardando">("ok");
   const [verDocs, setVerDocs] = useState(true);
   const [verAjustes, setVerAjustes] = useState(false);
+  const [verSubir, setVerSubir] = useState(false);
   const [preview, setPreview] = useState<{ idx: number; t: number; preparando?: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cursoRef = useRef<Curso | null>(null);
@@ -272,6 +274,10 @@ export default function EditorCurso({ params }: { params: Promise<{ id: string }
           title="Renderiza las lecciones que falten y las une en un solo vídeo con capítulos">
           🎬 Renderizar curso
         </button>
+        <button type="button" style={btn} onClick={async () => { await guardarYa(); setVerSubir(true); }}
+          title="Elige qué lecciones subir (o todas) y si van públicas, ocultas o privadas">
+          ⬆ Subir a YouTube
+        </button>
       </div>
 
       {curso.render?.archivo && (
@@ -421,6 +427,8 @@ export default function EditorCurso({ params }: { params: Promise<{ id: string }
           />
         </div>
       )}
+
+      {verSubir && <SubirYoutube cursoId={id} onCerrar={() => setVerSubir(false)} onTarea={revisarTareas} />}
 
       {verAjustes && (
         <AjustesCurso curso={curso} onCerrar={() => setVerAjustes(false)} onGuardado={(c) => { cursoRef.current = { ...c, modulos: cursoRef.current!.modulos }; setCurso(cursoRef.current); setVerAjustes(false); }} />

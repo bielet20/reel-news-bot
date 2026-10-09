@@ -102,6 +102,35 @@ def _encolar(curso_id: str, tipo: str, etiqueta: str, fn, objetivo: str = "", al
     return _publica(tarea)
 
 
+def _lanzar_aparte(curso_id: str, tipo: str, etiqueta: str, fn) -> dict:
+    """Como _encolar, pero en un hilo propio: subir a YouTube es red, no CPU ni
+    LM Studio, y no debe parar la cola de render. Sale igual en las tareas."""
+    tid = uuid.uuid4().hex[:10]
+    tarea = {"id": tid, "curso_id": curso_id, "tipo": tipo, "etiqueta": etiqueta, "objetivo": "",
+             "estado": "en_curso", "log": [], "error": "", "resultado": None, "creada": cs.ahora()}
+    with _tareas_lock:
+        _tareas[tid] = tarea
+
+    def run():
+        def log(msg):
+            tarea["log"].append(str(msg))
+            del tarea["log"][:-300]
+        estado = "completada"
+        try:
+            tarea["resultado"] = fn(log)
+        except Exception as e:  # noqa: BLE001
+            estado = "error"
+            tarea["error"] = str(e)
+            log(f"ERROR: {e}")
+            traceback.print_exc()
+        with _tareas_lock:
+            tarea["estado"] = estado
+            tarea["fin"] = cs.ahora()
+
+    threading.Thread(target=run, daemon=True, name=f"cursos-{tipo}").start()
+    return _publica(tarea)
+
+
 def _publica(t: dict) -> dict:
     return {k: v for k, v in t.items() if k not in ("al_terminar", "resultado")}
 
@@ -219,6 +248,48 @@ def fijar_url_canal(curso_id: str, channel_id: str, req: UrlPublicada):
         raise HTTPException(404, "Vinculo no encontrado")
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+class PublicarCurso(BaseModel):
+    lecciones: list[str] = []
+    completo: bool = False
+    privacidad: str = "public"   # public | unlisted (oculto) | private
+    resubir: bool = False
+
+
+@router.get("/{curso_id}/publicacion")
+def estado_publicacion(curso_id: str):
+    """Lecciones renderizadas y lo ya subido a YouTube, para elegir qué subir."""
+    _cargar(curso_id)
+    import course_publicar as cp
+    return cp.estado(curso_id)
+
+
+@router.post("/{curso_id}/publicar")
+def publicar_curso(curso_id: str, req: PublicarCurso):
+    """Sube a YouTube (canal de cursos) las lecciones elegidas y/o el curso entero."""
+    _cargar(curso_id)
+    import course_publicar as cp
+    if req.privacidad not in cp.PRIVACIDADES:
+        raise HTTPException(400, "Privacidad no válida (public, unlisted o private).")
+    if not req.lecciones and not req.completo:
+        raise HTTPException(400, "Elige al menos una lección o el curso completo.")
+    with _tareas_lock:
+        if any(t["curso_id"] == curso_id and t["tipo"] == "publicar" and t["estado"] == "en_curso"
+               for t in _tareas.values()):
+            raise HTTPException(409, "Ya hay una subida de este curso en marcha.")
+    n = len(req.lecciones) + (1 if req.completo else 0)
+    etiqueta = f"Subir a YouTube ({n} vídeo{'s' if n != 1 else ''}, {cp.NOMBRE_PRIVACIDAD[req.privacidad]})"
+
+    def fn(log):
+        r = cp.publicar(curso_id, req.lecciones, completo=req.completo, privacidad=req.privacidad,
+                        resubir=req.resubir, log=log)
+        if r["fallos"] and not r["subidas"]:
+            raise RuntimeError("No se subió ningún vídeo: " + r["fallos"][0]["error"])
+        if r["fallos"]:
+            log(f"Subidos {len(r['subidas'])}; fallaron {len(r['fallos'])} (puedes reintentarlos)")
+        return r
+    return _lanzar_aparte(curso_id, "publicar", etiqueta, fn)
 
 
 @router.get("/{curso_id}")
