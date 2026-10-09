@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import PanelEstadoSistema from "../components/PanelEstadoSistema";
 
 type DestType = "local" | "drive" | "smb";
 
@@ -124,8 +125,8 @@ export default function SettingsPage() {
   const fieldKey = form.type === "local" ? "path" : "rclone_remote";
 
   return (
-    <main className="min-h-screen px-4 py-10">
-      <div className="max-w-4xl mx-auto">
+    <main className="min-h-screen py-10">
+      <div className="page-wrap">
         {/* Toast */}
         {toast && (
           <div style={{
@@ -140,9 +141,20 @@ export default function SettingsPage() {
           </div>
         )}
 
+        <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Settings</h1>
+
+        {/* Estado del sistema: todo lo que necesita cada sección y cómo arrancarlo */}
+        <section style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 18, margin: "18px 0 28px" }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 4px" }}>Estado del sistema</h2>
+          <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 12px" }}>
+            Qué servicios están funcionando. Cada sección de la app avisa arriba si le falta alguno.
+          </p>
+          <PanelEstadoSistema />
+        </section>
+
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
           <div>
-            <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Settings</h1>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 4px", color: "var(--text)" }}>Destinos de almacenamiento</h2>
             <p style={{ color: "var(--muted)", fontSize: 14 }}>
               Destinos de almacenamiento — copia automática de cada video generado.
             </p>

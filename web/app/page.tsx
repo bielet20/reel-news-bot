@@ -6,6 +6,8 @@ import ImagePicker, { type ImageConfig } from "./components/ImagePicker";
 import AvatarPicker, { type AvatarConfig } from "./components/AvatarPicker";
 import VoicePicker, { type VoiceConfig } from "./components/VoicePicker";
 import DiscoverPanel from "./components/DiscoverPanel";
+import AvisoServicios from "./components/AvisoServicios";
+import { BarraProgresoLog } from "./components/BarraProgreso";
 
 type Mode = "url" | "texto" | "youtube" | "musica" | "tema" | "descubrir";
 
@@ -76,6 +78,14 @@ interface SummaryItem {
 }
 interface SummaryGroup { title: string; items: SummaryItem[] }
 
+type Formato = "corto" | "medio" | "largo";
+
+const FORMATOS: Record<Formato, { icon: string; label: string; desc: string; min: number; max: number; defecto: number }> = {
+  corto: { icon: "⚡", label: "Corto", desc: "10-30 s · gancho + dato + giro", min: 10, max: 30, defecto: 30 },
+  medio: { icon: "🎬", label: "Medio", desc: "Hasta 60 s · 3 revelaciones", min: 31, max: 60, defecto: 60 },
+  largo: { icon: "📺", label: "Largo", desc: "Vídeo entero · hasta 30 min", min: 120, max: 1800, defecto: 600 },
+};
+
 export default function Home() {
   const [mode, setMode] = useState<Mode>("descubrir");
   const [submitting, setSubmitting] = useState(false);
@@ -98,12 +108,18 @@ export default function Home() {
   const [musicaMostrarNombre, setMusicaMostrarNombre] = useState(false);
   const [tipoContenido, setTipoContenido] = useState<"noticia" | "curiosidad">("noticia");
   const [subirYoutube, setSubirYoutube] = useState(false);
-  const [portadaIa, setPortadaIa] = useState(false);
+  const [portadaIa, setPortadaIa] = useState(true);
   const [videoIa, setVideoIa] = useState(false);
   const [ytCredOk, setYtCredOk] = useState<boolean | null>(null);
   const [ytCanal, setYtCanal] = useState("");
   const [cantidad, setCantidad] = useState(1);
-  const [duracion, setDuracion] = useState(60);
+  // Formato del vídeo: corto 10-30 s, medio hasta 60 s, largo = vídeo entero
+  // de la noticia o curiosidad (2-30 min, solo para noticias).
+  const [formato, setFormato] = useState<Formato>("corto");
+  const [duracion, setDuracion] = useState(30);
+  const [minutosLargo, setMinutosLargo] = useState(10);
+  const admiteLargo = mode === "url" || mode === "texto" || mode === "tema";
+  const formatoEfectivo: Formato = formato === "largo" && !admiteLargo ? "medio" : formato;
   const [marca, setMarca] = useState("");
   const [mostrarTitulo, setMostrarTitulo] = useState(false);
   const [mostrarSubtitulos, setMostrarSubtitulos] = useState(false);
@@ -228,7 +244,7 @@ export default function Home() {
             { label: "Nombre y artista en el video", active: musicaMostrarNombre },
             ...(artista ? [{ label: "Artista", value: artista, active: musicaMostrarNombre }] : []),
           ] : []),
-          { label: "Duración máxima", value: `${duracion}s`, active: true, always: true },
+          { label: "Formato", value: formatoEfectivo === "largo" ? `Largo · hasta ${minutosLargo} min` : `${FORMATOS[formatoEfectivo].label} · ${duracion}s`, active: true, always: true },
         ],
       },
       ...(mode !== "youtube" && mode !== "musica" ? [{
@@ -327,7 +343,11 @@ export default function Home() {
     setShowConfirm(false);
     setActiveJob(null);
 
-    const body: Record<string, unknown> = { mode, duracion_maxima: duracion };
+    const body: Record<string, unknown> = {
+      mode,
+      duracion_maxima: formatoEfectivo === "largo" ? minutosLargo * 60 : duracion,
+      largo: formatoEfectivo === "largo",
+    };
 
     if (mode === "url") body.url = url;
     else if (mode === "texto") {
@@ -488,8 +508,9 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen px-4 py-10">
-      <div className="max-w-4xl mx-auto">
+    <main className="min-h-screen py-10">
+      <div className="page-wrap">
+        <AvisoServicios seccion="generar" />
         <div className="mb-10 text-center">
           <h1 className="text-3xl font-bold mb-2" style={{ color: "var(--accent)" }}>
             Reel News Bot
@@ -499,7 +520,10 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="rounded-2xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        {/* Dos columnas en pantallas anchas: configuración | visualización
+            (job en curso + vídeos recientes). En móvil se apilan. */}
+        <div className="grid gap-6 items-start xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
+        <div className="rounded-2xl p-4 sm:p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           {/* Mode selector */}
           <div className="flex gap-2 flex-wrap mb-5">
             {MODES.map((m) => (
@@ -720,8 +744,8 @@ export default function Home() {
 
             {/* Music Picker Modal */}
             {showMusicPicker && (
-              <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 20, width: 440, maxHeight: "70vh", display: "flex", flexDirection: "column" }}>
+              <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 20, width: "100%", maxWidth: 440, maxHeight: "calc(70vh / var(--zoom, 1))", display: "flex", flexDirection: "column" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                     <p style={{ fontWeight: 700, fontSize: 15, margin: 0 }}>Elegir música de fondo</p>
                     <button onClick={() => setShowMusicPicker(false)} style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
@@ -881,15 +905,52 @@ export default function Home() {
               )}
             </div>
 
-            <Field label={`Duración máxima: ${duracion}s`}>
-              <input
-                type="range" min={20} max={60} value={duracion}
-                onChange={(e) => setDuracion(Number(e.target.value))}
-                className="w-full accent-purple-500 mt-1"
-              />
-              <div className="flex justify-between text-xs mt-1" style={{ color: "var(--muted)" }}>
-                <span>20s</span><span>60s</span>
+            <Field label="Formato del vídeo">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {(Object.keys(FORMATOS) as Formato[])
+                  .filter((f) => f !== "largo" || admiteLargo)
+                  .map((f) => {
+                    const info = FORMATOS[f];
+                    const activo = formatoEfectivo === f;
+                    return (
+                      <button key={f} type="button"
+                        onClick={() => { setFormato(f); if (f !== "largo") setDuracion(info.defecto); }}
+                        style={{ flex: "1 1 140px", padding: "8px 6px", borderRadius: 8, border: `1px solid ${activo ? "var(--accent)" : "var(--border)"}`, background: activo ? "rgba(99,102,241,0.12)" : "var(--surface)", cursor: "pointer", textAlign: "center" }}>
+                        <div style={{ fontSize: 18, marginBottom: 2 }}>{info.icon}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: activo ? "var(--accent)" : "var(--text)" }}>{info.label}</div>
+                        <div style={{ fontSize: 10, color: "var(--muted)" }}>{info.desc}</div>
+                      </button>
+                    );
+                  })}
               </div>
+              {formatoEfectivo === "largo" ? (
+                <div style={{ marginTop: 10 }}>
+                  <div className="flex justify-between text-xs" style={{ color: "var(--muted)" }}>
+                    <span>Duración máxima</span><span style={{ color: "var(--text)", fontWeight: 600 }}>{minutosLargo} min</span>
+                  </div>
+                  <input type="range" min={2} max={30} value={minutosLargo}
+                    onChange={(e) => setMinutosLargo(Number(e.target.value))}
+                    className="w-full accent-purple-500 mt-1" />
+                  <div className="flex justify-between text-xs mt-1" style={{ color: "var(--muted)" }}>
+                    <span>2 min</span><span>30 min</span>
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
+                    Guion en 4 actos (gancho, contexto, impacto, debate). Si la noticia no da para tanto, el vídeo sale más corto en vez de rellenar.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ marginTop: 10 }}>
+                  <div className="flex justify-between text-xs" style={{ color: "var(--muted)" }}>
+                    <span>Duración máxima</span><span style={{ color: "var(--text)", fontWeight: 600 }}>{duracion}s</span>
+                  </div>
+                  <input type="range" min={FORMATOS[formatoEfectivo].min} max={FORMATOS[formatoEfectivo].max} value={duracion}
+                    onChange={(e) => setDuracion(Number(e.target.value))}
+                    className="w-full accent-purple-500 mt-1" />
+                  <div className="flex justify-between text-xs mt-1" style={{ color: "var(--muted)" }}>
+                    <span>{FORMATOS[formatoEfectivo].min}s</span><span>{FORMATOS[formatoEfectivo].max}s</span>
+                  </div>
+                </div>
+              )}
             </Field>
 
             {error && (
@@ -915,6 +976,7 @@ export default function Home() {
           </form>
         </div>
 
+        <div className="min-w-0 [&>*:first-child]:mt-0">
         {/* Job panel inline */}
         {activeJob && (
           <JobPanel
@@ -927,6 +989,8 @@ export default function Home() {
         )}
 
         <RecentVideos />
+        </div>
+        </div>
       </div>
 
       {/* Modal de confirmación */}
@@ -962,7 +1026,7 @@ function ConfirmModal({
         border: "1px solid var(--border)",
         borderRadius: 18,
         width: "100%", maxWidth: 520,
-        maxHeight: "85vh",
+        maxHeight: "calc(85vh / var(--zoom, 1))",
         display: "flex", flexDirection: "column",
         overflow: "hidden",
       }}>
@@ -1099,6 +1163,12 @@ function JobPanel({
         </div>
       </div>
 
+      {(job.status === "pending" || job.status === "running") && (
+        <div style={{ padding: "6px 16px 4px", background: "var(--surface)" }}>
+          <BarraProgresoLog jobId={job.id} logs={job.logs} status={job.status} />
+        </div>
+      )}
+
       {logsExpanded && (
         <pre ref={logRef} className="text-xs p-4 overflow-auto whitespace-pre-wrap"
           style={{ background: "#050408", color: "#c8c0e0", maxHeight: "300px", fontFamily: "ui-monospace, monospace" }}>
@@ -1110,8 +1180,8 @@ function JobPanel({
         <div className="p-4 space-y-3" style={{ background: "var(--surface)" }}>
           {job.output_files.map((filename) => (
             <div key={filename} className="space-y-3">
-              <video src={`/videos/${filename}`} controls className="w-full rounded-xl"
-                style={{ background: "#000", maxHeight: "500px" }} />
+              <video src={`/videos/${filename}`} controls className="w-full rounded-xl max-h-[calc(62vh/var(--zoom,1))]"
+                style={{ background: "#000" }} />
               <a href={`/videos/${filename}`} download className="block text-center text-sm py-2 rounded-lg font-medium"
                 style={{ background: "var(--accent)", color: "#fff" }}>
                 ↓ Descargar

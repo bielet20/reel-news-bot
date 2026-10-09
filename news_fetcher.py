@@ -201,6 +201,10 @@ DOMINIOS_CONFIABLES = {
     "mayoclinic.org", "health.harvard.edu", "medlineplus.gov",
     "agenciasinc.es", "eurekalert.org", "livescience.com",
     "space.com", "popsci.com",
+    # Espacio y meteorología
+    "esa.int", "eso.org", "noaa.gov", "aemet.es", "metoffice.gov.uk",
+    "spacenews.com", "spaceflightnow.com", "universetoday.com",
+    "severe-weather.eu",
     # IA y tecnología verificada
     "technologyreview.com", "arstechnica.com", "ieee.org", "spectrum.ieee.org",
     "wired.com", "theverge.com", "404media.co", "techmeme.com",
@@ -226,6 +230,7 @@ NIVEL_DOMINIO = {
     # Ciencia y salud institucional nivel 1
     "nature.com": 1, "science.org": 1,
     "who.int": 1, "nih.gov": 1, "nasa.gov": 1, "cdc.gov": 1, "un.org": 1,
+    "esa.int": 1, "eso.org": 1, "noaa.gov": 1, "aemet.es": 1, "metoffice.gov.uk": 1,
     "technologyreview.com": 1, "arstechnica.com": 1,
     "ieee.org": 1, "spectrum.ieee.org": 1,
     # Prensa de referencia nivel 2
@@ -254,6 +259,8 @@ NIVEL_DOMINIO = {
     "cnet.com": 3, "engadget.com": 3, "zdnet.com": 3,
     "businessinsider.com": 3, "fortune.com": 3,
     "e360.yale.edu": 3, "grist.org": 3, "insideclimatenews.org": 3,
+    "spacenews.com": 3, "spaceflightnow.com": 3, "universetoday.com": 3,
+    "space.com": 3, "severe-weather.eu": 3,
     "dawn.com": 3, "arabnews.com": 3, "middleeasteye.net": 3,
     "eldiario.es": 3, "publico.es": 3, "elperiodico.com": 3,
     "semana.com": 3, "emol.com": 3, "elcomercio.pe": 3,
@@ -274,6 +281,10 @@ _ORG_DOMINIO = {
     "spectrum.ieee.org": "IEEE",
     "who.int": "OMS", "nih.gov": "NIH", "nasa.gov": "NASA",
     "cdc.gov": "CDC", "un.org": "ONU",
+    "esa.int": "ESA", "eso.org": "ESO", "noaa.gov": "NOAA", "aemet.es": "AEMET",
+    "metoffice.gov.uk": "Met Office", "spacenews.com": "SpaceNews",
+    "spaceflightnow.com": "Spaceflight Now", "universetoday.com": "Universe Today",
+    "space.com": "Space.com", "severe-weather.eu": "Severe Weather Europe",
     "newscientist.com": "New Scientist", "agenciasinc.es": "SINC",
     "scientificamerican.com": "Scientific American",
     "nationalgeographic.com": "Nat Geo",
@@ -406,6 +417,8 @@ CATEGORIAS = {
     "salud": "salud",
     "deportes": "deportes",
     "entretenimiento": "entretenimiento OR cine OR musica",
+    "espacio": "NASA OR SpaceX OR ESA OR astronomía OR cohete OR asteroide",
+    "tiempo": "tormenta OR huracán OR DANA OR \"ola de calor\" OR inundaciones OR terremoto",
 }
 
 # ---------------------------------------------------------------------------
@@ -425,6 +438,7 @@ FUENTES_POR_CATEGORIA: dict[str, list[tuple[str, str]]] = {
         ("https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/bienestar", "El País Bienestar"),
         ("https://www.infobae.com/feeds/rss/salud/",                          "Infobae Salud"),
         (_gnews_site("reuters.com", "health OR medicine"),                    "Reuters Health"),
+        ("https://www.sciencedaily.com/rss/health_medicine.xml",              "Science Daily Medicina"),
     ],
     "nutricion": [
         ("https://www.who.int/rss-feeds/news-english.xml",                    "OMS/WHO"),
@@ -534,6 +548,25 @@ FUENTES_POR_CATEGORIA: dict[str, list[tuple[str, str]]] = {
         ("https://www.elmundo.es/rss/cultura.xml",                            "El Mundo Cultura"),
         ("http://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",       "BBC Entertainment"),
     ],
+    "espacio": [
+        ("https://www.nasa.gov/feed/",                                        "NASA"),
+        ("https://www.esa.int/rssfeed/Our_Activities/Space_News",             "ESA"),
+        ("https://spacenews.com/feed/",                                       "SpaceNews"),
+        ("https://spaceflightnow.com/feed/",                                  "Spaceflight Now"),
+        ("https://www.universetoday.com/feed/",                               "Universe Today"),
+        (_gnews_site("reuters.com", "space OR NASA OR SpaceX OR rocket"),     "Reuters Space"),
+        (_gnews_site("space.com", "space"),                                   "Space.com"),
+        ("https://www.elmundo.es/rss/ciencia.xml",                            "El Mundo Ciencia"),
+    ],
+    # Tiempo = meteorología y fenómenos extremos (tormentas, huracanes, olas de calor)
+    "tiempo": [
+        ("https://www.severe-weather.eu/feed/",                               "Severe Weather Europe"),
+        ("https://www.theguardian.com/world/extreme-weather/rss",             "Guardian Extreme Weather"),
+        (_gnews_site("reuters.com", "weather OR storm OR hurricane OR heatwave OR flood"), "Reuters Weather"),
+        (_gnews_site("apnews.com", "weather OR storm OR hurricane OR heat wave"), "AP Weather"),
+        (_gnews_site("aemet.es", "aviso OR tormenta OR calor", hl="es", gl="ES"), "AEMET"),
+        ("https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/clima-y-medio-ambiente", "El País Clima"),
+    ],
     "medioambiente": [
         ("http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",      "BBC Medio Ambiente"),
         ("https://www.carbonbrief.org/feed/",                                 "Carbon Brief"),
@@ -554,8 +587,16 @@ _PALABRAS_CATEGORIA: dict[str, list[str]] = {
                        "alimento", "comida", "obesidad", "vitamina", "proteína",
                        "proteina", "vegano", "vegana", "keto", "ayuno"],
     "ciencia":        ["ciencia", "science", "investigación", "investigacion", "estudio",
-                       "nasa", "espacio", "space", "física", "química", "biología",
-                       "genética", "genetica", "neurociencia", "astronomía", "astronomia"],
+                       "física", "química", "biología",
+                       "genética", "genetica", "neurociencia"],
+    "espacio":        ["nasa", "espacio", "space", "astronomía", "astronomia", "spacex",
+                       "cohete", "rocket", "asteroide", "asteroid", "planeta", "galaxia",
+                       "telescopio", "telescope", "luna", "marte", "mars", "esa",
+                       "satélite", "satelite", "astronauta"],
+    "tiempo":         ["tiempo", "meteorología", "meteorologia", "tormenta", "huracán",
+                       "huracan", "hurricane", "dana", "ola de calor", "heatwave",
+                       "inundación", "inundacion", "granizo", "nevada", "aemet", "tornado",
+                       "tifón", "tifon", "terremoto", "sismo"],
     "ia":             ["inteligencia artificial", "artificial intelligence", "chatgpt",
                        "openai", "anthropic", "deepmind", "machine learning",
                        "aprendizaje automático", "llm", "gpt", "claude", "gemini",
@@ -1065,6 +1106,85 @@ def buscar_variadas(temas=None, por_tema: int = 3, pais: str = "ES") -> list:
         item["score_noticia"] = round(_score_relevancia(item), 1)
 
     agrupados.sort(key=lambda it: -it["score_noticia"])
+    return agrupados
+
+
+# ---------------------------------------------------------------------------
+# Nicho: solo las categorías que elige el canal, y solo de última hora
+# ---------------------------------------------------------------------------
+
+# Categorías que se pueden elegir como nicho del canal (id → nombre visible)
+NICHOS_DISPONIBLES = {
+    "ciencia": "Ciencia",
+    "tecnologia": "Tecnología",
+    "ia": "Inteligencia artificial",
+    "salud": "Salud y medicina",
+    "espacio": "Espacio",
+    "tiempo": "Tiempo y clima extremo",
+    "medioambiente": "Medio ambiente",
+    "economia": "Economía",
+    "cripto": "Cripto",
+    "mundo": "Internacional",
+    "politica": "Política",
+    "deportes": "Deportes",
+    "entretenimiento": "Entretenimiento",
+}
+
+
+def _leer_feed(rss_url: str, nombre: str, categoria: str, max_por_fuente: int) -> list:
+    try:
+        feed = feedparser.parse(rss_url)
+        items = [_item_desde_entry(e, nombre, categoria=categoria)
+                 for e in feed.entries[:max_por_fuente]]
+        for it in items:
+            it["tema"] = categoria
+        return items
+    except Exception:
+        return []
+
+
+def _gnews_categoria(categoria: str, max_resultados: int) -> list:
+    if categoria not in CATEGORIAS:
+        return []
+    try:
+        items = buscar_noticias(categoria, max_resultados=max_resultados, solo_confiables=True)
+    except Exception:
+        return []
+    for it in items:
+        it["tema"] = categoria
+        it["categoria_detectada"] = categoria
+    return items
+
+
+def buscar_nicho(categorias: list[str], max_horas: float = 24,
+                 max_por_fuente: int = 6) -> list:
+    """
+    Noticias de última hora SOLO de las categorías del nicho: feeds
+    especializados de cada categoría + Google News (dominios confiables).
+    Descarta lo que tenga más de `max_horas` o no traiga fecha, agrupa la
+    misma historia contada por varios medios y ordena por relevancia.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    tareas = []
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        for cat in categorias:
+            for rss_url, nombre in FUENTES_POR_CATEGORIA.get(cat, []):
+                tareas.append(ex.submit(_leer_feed, rss_url, nombre, cat, max_por_fuente))
+            tareas.append(ex.submit(_gnews_categoria, cat, 5))
+        pool = [it for t in tareas for it in t.result()]
+
+    recientes = [
+        it for it in pool
+        if (it.get("recencia") or {}).get("horas") is not None
+        and it["recencia"]["horas"] <= max_horas
+    ]
+    agrupados = confirmar_historias(recientes, umbral=0.42, colapsar=True)
+    for item in agrupados:
+        item["score_noticia"] = round(_score_relevancia(item), 1)
+    agrupados.sort(key=lambda it: -it["score_noticia"])
+    print(f"[nicho] {', '.join(categorias)}: {len(pool)} noticias, "
+          f"{len(recientes)} de las últimas {max_horas:g}h, {len(agrupados)} historias")
     return agrupados
 
 

@@ -17,7 +17,7 @@ DEFAULTS = {
     "servicio_voz":       "edge-tts",
     "voz":                "es-ES-AlvaroNeural",
     "tipo_contenido":     "noticia",
-    "duracion_maxima":    60,
+    "duracion_maxima":    30,
     "mostrar_subtitulos": True,
     "mostrar_titulo":     True,
     "marca":              "",
@@ -48,7 +48,7 @@ class GenerationPrefs(BaseModel):
     servicio_voz:       str   = "edge-tts"
     voz:                str   = "es-ES-AlvaroNeural"
     tipo_contenido:     str   = "noticia"
-    duracion_maxima:    int   = 60
+    duracion_maxima:    int   = 30
     mostrar_subtitulos: bool  = True
     mostrar_titulo:     bool  = True
     marca:              str   = ""

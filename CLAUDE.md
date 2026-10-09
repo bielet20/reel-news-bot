@@ -1,15 +1,17 @@
 # Reel News Bot — generador de reels/shorts
 
-Dos productos en el mismo repo:
+Tres productos en el mismo repo (manual de usuario: **`docs/MANUAL.md`**):
 
-1. **CLI de noticias→shorts** (`main.py`): noticia / URL / vídeo de YouTube / tendencia
-   → guion → TTS o clip real → vídeo vertical → sube a IG/YT/TikTok.
-2. **App web de Montaje** (`web/` + `api/`): subes una canción + su letra y genera
-   un videoclip por secciones con **fondos de vídeo IA** (ComfyUI local) y la letra
-   **sincronizada con lo que se canta**.
+1. **Noticias → shorts** (`main.py` + web Generar/Gestor): noticia / URL / vídeo de YouTube /
+   tendencia → guion (formato Corto 10-30 s, Medio ≤60 s o Largo 2-30 min) → TTS o clip real
+   → vídeo → sube a IG/YT/TikTok.
+2. **Montaje** (`/montaje`): subes una canción + su letra y genera un videoclip por secciones
+   con **fondos de vídeo IA** (ComfyUI local) y la letra **sincronizada con lo que se canta**.
+3. **Cursos y formaciones** (`/cursos`): documentación → temario → lecciones con diapositivas
+   y narración → editor con línea de tiempo → vídeo 16:9.
 
-Rama de trabajo actual: **`fix/local-reel-builder-and-encoding`** (todo el Montaje
-con vídeo IA, la sincronía de letra, y la integración con AI Studio viven aquí).
+El stack que corre de verdad monta **`C:\Dev\reel-news-bot`** (rama `main`), no
+`C:\Users\biel\reel-news-bot`.
 
 ## Arranque
 
@@ -64,6 +66,53 @@ Flujo (código en `lyric_video_builder.py` + `comfy_video_builder.py`, endpoints
 `POST /api/music-clip/reanudar/{slug}` (reusa el plan, salta lo ya hecho). El
 formulario se autoguarda en `localStorage` (`montaje_draft_v1`).
 
+## Estado del sistema y arranque (`api/sistema.py`)
+
+Manual de usuario completo: **`docs/MANUAL.md`**.
+
+- **Al arrancar** el backend (`@app.on_event("startup")` → `preparar_arranque`): crea las
+  carpetas de datos, y si falta alguna librería de `LIBRERIAS` la **instala en segundo plano**
+  con pip (`AUTO_INSTALAR_LIBS=0` lo desactiva). Deja un informe `[arranque] …` en el log.
+- `GET /api/sistema/estado` (caché 8 s): componentes (`llm`, `comfyui`, `control_center`,
+  `internet`, `frontend`, `ffmpeg`, `chromium`, `libs_documentos`, `whisper`, `librerias`,
+  `disco`, `carpetas`) y, por sección, qué falta (`SECCIONES`: obligatorio / opcional).
+  `POST /api/sistema/arrancar/{llm|comfyui}` despierta el Mac o arranca ComfyUI vía Centro de Control.
+- **Web**: `components/estadoSistema.ts` (un único sondeo compartido, 20 s / 4 s si algo arranca),
+  `AvisoServicios` arriba de cada página (`seccion="..."`), `EstadoMac` en la barra (resumen) y
+  `PanelEstadoSistema` en Settings. **Página nueva → añadir `<AvisoServicios seccion=…/>` y su
+  entrada en `SECCIONES`.**
+
+## Cursos y formaciones (`/cursos`)
+
+Documentación → temario → lecciones (escenas = diapositiva + narración) → editor → vídeo 16:9.
+
+- **Datos**: `_cursos/<id>/curso.json` + `docs/` (texto extraído, `originales/`) + `assets/`
+  (imágenes, `videos/` = grabaciones de pantalla) + `audio/` + `render/`. Rutas en el JSON
+  siempre **relativas al curso**; se sirven por `GET /api/cursos/{id}/archivo/{ruta}`.
+  Modelo y utilidades en `course_store.py`.
+- **Ingesta** (`course_ingest.py`): PDF (pymupdf, secciones por el índice del PDF), .docx,
+  .pptx (además devuelve cada diapositiva con viñetas, imágenes y **notas → narración**),
+  Markdown/texto y URLs (`article_extractor`).
+- **IA** (`course_builder.py`): `proponer_temario`, `generar_leccion` (JSON de escenas con
+  layout; usa solo la documentación, sección relevante por solapamiento de palabras),
+  `importar_pptx`. LM Studio con la cadena de `summarizer._completar_largo`.
+- **Render** (`course_render.py`): voz por escena con caché por hash (texto+voz) → PNG de
+  cada diapositiva fotografiando **la página del frontend** `/cursos/render/<curso>/<escena>`
+  con el Chromium de Playwright del backend (`CURSOS_FRONTEND_URL`, por defecto
+  `http://frontend:3000`) → ffmpeg libx264 (NVENC no funciona dentro del contenedor) →
+  música con sidechain + subtítulos .srt (quemados si `subtitulos`). Clips de vídeo:
+  recorte inicio/fin; si la voz en off es más larga, se congela el último fotograma.
+- **Un solo renderizador**: `web/app/cursos/components/SlideRender.tsx` (sin hooks, sirve
+  como componente de servidor). Lo usan el editor (con edición en línea) y la página de
+  render. Cambiar un layout = cambia el editor y el vídeo a la vez.
+- **Tareas**: cola de un solo hilo en `api/cursos.py` (IA y render, una a la vez). Viven en
+  memoria: **un `--reload` de uvicorn (editar cualquier .py) mata la tarea en curso**.
+- **Autoguardado del editor**: `PUT /api/cursos/{id}/estructura` con los módulos completos;
+  el servidor conserva `audio`/`render`/`estado` y no deja que una copia vieja vacíe una
+  lección recién generada. Cambiar la narración invalida el audio.
+- Fase 2 pendiente: avatar en una esquina (`avatar_generator`), más transiciones,
+  intro/outro, 4K, render fiel de .pptx con LibreOffice.
+
 ## Integración con AI Studio (Centro de Control)
 
 El backend (Docker) llama al Centro de Control del host (`E:\AI-Studio`, `:8090`)
@@ -72,6 +121,31 @@ por `host.docker.internal`:
 - `POST /api/service/lmstudio/unload` → libera la VRAM del modelo tras el guion.
 Config: `CONTROL_CENTER_URL`, `COMFY_URL`, `LLM_BASE_URL` en `.env`.
 `docker-compose.yml` tiene `extra_hosts: host.docker.internal:host-gateway`.
+
+## Centro de Redes (`/redes`, `centro_redes.py`, `api/redes.py`)
+
+Un solo sitio para las cuentas de redes y los canales (marcas) que las usan;
+todas las aplicaciones publican por aquí.
+- **Cuenta** = una conexión a una red (p. ej. YouTube RAYVERMUSIC). Sus secretos
+  siguen en `_tokens/<fichero>.json`; el registro solo apunta al fichero.
+- **Canal** = marca (Bieninforma2, RAYVER, RayverSec…): qué cuenta usa en cada red
+  y cómo publica (categoría, pie, tags, playlist).
+- Registro `_config/redes.json` (se siembra la primera vez con los tokens que ya
+  existían); historial `_config/redes_publicaciones.json`.
+- `POST /api/redes/publicar` (form: `canal`, `titulo`, `descripcion`, `redes`,
+  `privacidad`, `origen` + `archivo` o `ruta` dentro de `output/`/`_uploads/`) →
+  `{trabajo}`; resultado en `GET /api/redes/trabajos/{id}`. Las subidas grandes van
+  directas a `:8000` (el proxy de Next corta cuerpos de >10 MB).
+- Conectar YouTube: `GET /api/redes/cuentas/{id}/conectar` usa la misma app y el
+  mismo redirect que Canales (`/api/accounts/youtube/callback`, que reparte por
+  `state`). Si el token es de otro canal, no se guarda; al subir se exige el
+  `channel_id` del canal (nunca se sube al canal equivocado).
+- `youtube_uploader.subir_video(token_file=…)`: un canal sin token NO cae al `.env`
+  (que es Bieninforma2). Cachés de servicio y playlists por token.
+- AI Studio (`E:\AI-Studio\tools\EstudioIA\publicar.py`) publica por esta API.
+- Fase 1: solo YouTube se publica desde el Centro; FB/IG/TikTok/X/WhatsApp siguen
+  por el sistema de reels (`/canales`) y aquí solo se ve su estado.
+- Tests: `tests/test_centro_redes.py`.
 
 ## Estructura
 

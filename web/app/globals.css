@@ -15,7 +15,11 @@
 }
 
 html {
-  zoom: 1.2; /* tamaño de la interfaz; A−/A+ en la barra lo ajusta */
+  /* Tamaño de la interfaz; A−/A+ en la barra lo ajusta. Con zoom, las
+     unidades vh también se amplían: las alturas en vh se escriben como
+     calc(90vh / var(--zoom, 1)) para que las ventanas quepan en pantalla */
+  --zoom: 1.2;
+  zoom: var(--zoom);
 }
 
 body {
@@ -27,3 +31,14 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--surface); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Contenedor de página: aprovecha el ancho de la ventana (tope solo para
+   monitores ultra-anchos) con márgenes laterales que crecen con la pantalla. */
+.page-wrap {
+  width: 100%;
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: clamp(12px, 2.5vw, 40px);
+  padding-right: clamp(12px, 2.5vw, 40px);
+}

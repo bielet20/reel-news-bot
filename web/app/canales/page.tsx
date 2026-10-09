@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import AvisoServicios from "../components/AvisoServicios";
 
 interface PlatformStatus {
   connected: boolean;
@@ -736,8 +737,9 @@ function CanalesContent() {
   const waCanalStatus = status?.whatsapp_canal;
 
   return (
-    <main className="min-h-screen px-4 py-10">
-      <div className="max-w-4xl mx-auto">
+    <main className="min-h-screen py-10">
+      <div className="page-wrap">
+        <AvisoServicios seccion="canales" />
         {/* Toast */}
         {toast && (
           <div style={{
@@ -756,6 +758,10 @@ function CanalesContent() {
           <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Canales</h1>
           <p style={{ color: "var(--muted)", fontSize: 14 }}>
             Conecta tus cuentas para publicar reels con un clic.
+          </p>
+          <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 8 }}>
+            Telegram de noticias (Bieninforma2) se administra en esta pagina. La conexion de cursos esta en el{" "}
+            <a href="/conexiones" style={{ color: "var(--accent)", textDecoration: "none" }}>Gestor de conexiones</a>.
           </p>
         </div>
 
@@ -855,7 +861,7 @@ function CanalesContent() {
                   overflow: "hidden",
                 }}>
                   {/* Main row */}
-                  <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+                  <div style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
                     <div style={{
                       width: 44, height: 44, borderRadius: 12,
                       background: "var(--surface2)",
@@ -865,7 +871,7 @@ function CanalesContent() {
                       {p.icon}
                     </div>
 
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                       <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>{p.name}</p>
                       {isConnected && st ? (
                         <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>
@@ -876,7 +882,7 @@ function CanalesContent() {
                       )}
                     </div>
 
-                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginLeft: "auto" }}>
                       {/* Credenciales toggle */}
                       <button
                         onClick={() => {
@@ -978,7 +984,7 @@ function CanalesContent() {
               borderRadius: 16,
               overflow: "hidden",
             }}>
-              <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
                 <div style={{
                   width: 44, height: 44, borderRadius: 12,
                   background: "var(--surface2)",
@@ -987,7 +993,7 @@ function CanalesContent() {
                 }}>
                   ✈️
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                   <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>Telegram</p>
                   {tgStatus?.connected ? (
                     <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>
@@ -997,7 +1003,7 @@ function CanalesContent() {
                     <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>No conectado</p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginLeft: "auto" }}>
                   {tgStatus?.connected && (
                     <button
                       onClick={() => setOpenCredsPanel(openCredsPanel === "telegram" ? null : "telegram")}
@@ -1086,7 +1092,7 @@ function CanalesContent() {
               borderRadius: 16,
               overflow: "hidden",
             }}>
-              <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
                 <div style={{
                   width: 44, height: 44, borderRadius: 12,
                   background: "var(--surface2)",
@@ -1095,7 +1101,7 @@ function CanalesContent() {
                 }}>
                   𝕏
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                   <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>X (Twitter)</p>
                   {xStatus?.connected ? (
                     <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>✓ @{xStatus.username}</p>
@@ -1103,7 +1109,7 @@ function CanalesContent() {
                     <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>No conectado</p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginLeft: "auto" }}>
                   {xStatus?.connected && (
                     <button
                       onClick={() => setOpenCredsPanel(openCredsPanel === "x" ? null : "x")}
@@ -1196,7 +1202,7 @@ function CanalesContent() {
               borderRadius: 16,
               overflow: "hidden",
             }}>
-              <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
                 <div style={{
                   width: 44, height: 44, borderRadius: 12,
                   background: "var(--surface2)",
@@ -1205,7 +1211,7 @@ function CanalesContent() {
                 }}>
                   💬
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                   <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>WhatsApp Status</p>
                   {waStatus?.connected && waStatus?.ready ? (
                     <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>✓ Conectado y listo</p>
@@ -1215,7 +1221,7 @@ function CanalesContent() {
                     <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>Esperando QR / Desconectado</p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginLeft: "auto" }}>
                   <button
                     onClick={handleWaQr}
                     disabled={waQrLoading}
@@ -1258,11 +1264,11 @@ function CanalesContent() {
               border: `1px solid ${fbStatus?.connected ? "var(--success)30" : "var(--border)"}`,
               borderRadius: 16, overflow: "hidden",
             }}>
-              <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, background: "#1877F220", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, color: "#1877F2", flexShrink: 0 }}>
                   f
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                   <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>Facebook Página</p>
                   {fbStatus?.connected ? (
                     <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>✓ {fbStatus.page_name || "Página conectada"}</p>
@@ -1270,7 +1276,7 @@ function CanalesContent() {
                     <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>No conectado</p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginLeft: "auto" }}>
                   {fbStatus?.connected ? (
                     <button onClick={handleFacebookDisconnect} disabled={disconnecting === "facebook"} style={{ padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, background: "#2a0a0a", border: "1px solid var(--error)40", color: "var(--error)", cursor: "pointer", opacity: disconnecting === "facebook" ? 0.5 : 1 }}>
                       {disconnecting === "facebook" ? "Desvinculando…" : "Desvincular"}
@@ -1290,11 +1296,11 @@ function CanalesContent() {
               border: `1px solid ${waCanalStatus?.connected ? "var(--success)30" : "var(--border)"}`,
               borderRadius: 16, overflow: "hidden",
             }}>
-              <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, background: "#25D36620", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "#25D366", flexShrink: 0 }}>
                   ⊕
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                   <p style={{ fontWeight: 600, fontSize: 15, margin: 0, color: "var(--text)" }}>WhatsApp Canal</p>
                   {waCanalStatus?.connected ? (
                     <p style={{ fontSize: 12, color: "var(--success)", margin: "2px 0 0" }}>
@@ -1304,7 +1310,7 @@ function CanalesContent() {
                     <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>No configurado</p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginLeft: "auto" }}>
                   {waCanalStatus?.connected ? (
                     <button onClick={handleWaCanelDisconnect} disabled={disconnecting === "whatsapp_canal"} style={{ padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, background: "#2a0a0a", border: "1px solid var(--error)40", color: "var(--error)", cursor: "pointer", opacity: disconnecting === "whatsapp_canal" ? 0.5 : 1 }}>
                       {disconnecting === "whatsapp_canal" ? "Desvinculando…" : "Desvincular"}

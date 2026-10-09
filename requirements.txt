@@ -39,3 +39,8 @@ faster-whisper
 click<8.2
 # Scraping de sitios con antibot/JS (fallback sobre requests)
 playwright>=1.44.0
+# Cursos: leer la documentación subida (PDF / Word / PowerPoint)
+pymupdf
+python-docx
+python-pptx
+tzdata>=2024.1

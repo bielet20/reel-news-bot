@@ -145,13 +145,11 @@ def _upload_youtube(req: PublishRequest, file_path: Path) -> dict:
 
 
 def _upload_tiktok(req: PublishRequest, file_path: Path) -> dict:
-    from tiktok_uploader import subir_video
+    # Se publica por el servicio bieninforma2-tiktok-api (api.bieninforma2.site):
+    # el tiktok_uploader.py viejo (OAuth localhost) no sirve con la Content Posting API.
+    from api.tiktok_post import publicar_video
     caption = req.tiktok_caption or req.descripcion or req.titulo or file_path.stem
-    result = subir_video(
-        str(file_path),
-        titulo=caption,
-        privacy=req.tiktok_privacy,
-    )
+    result = publicar_video(file_path, titulo=caption, privacy_level=req.tiktok_privacy)
     return {"status": "ok", "publish_id": result.get("publish_id")}
 
 

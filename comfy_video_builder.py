@@ -346,6 +346,15 @@ def _llm_completion(system_prompt: str, user_prompt: str, max_tokens: int = 6000
     espacio para un JSON con una escena por sección."""
     errores = []
 
+    # 0) Grok, si reel-news-bot está conectado al puente del PC
+    try:
+        from llm_local import completar_grok
+        return completar_grok(user_prompt, max_tokens=max_tokens, temperature=temperature,
+                              system=system_prompt, timeout=300)
+    except Exception as e:  # noqa: BLE001
+        if "LLM_PROVEEDOR no es grok" not in str(e):
+            errores.append(f"Grok: {e}")
+
     # 1) LM Studio local (gratis, sin internet) via host.docker.internal
     try:
         cuerpo = {

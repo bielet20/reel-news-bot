@@ -9,6 +9,7 @@
 //    publicarse sola.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import AvisoServicios from "../components/AvisoServicios";
 
 interface Punto { t: string; n: number }
 interface Noticia {
@@ -269,7 +270,8 @@ export default function FuentesPage() {
   const aptas = noticias.filter((n) => n.apta_auto).length;
 
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 16px 64px" }}>
+    <div className="page-wrap" style={{ paddingTop: 28, paddingBottom: 64 }}>
+      <AvisoServicios seccion="fuentes" />
       <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Fuentes y verificación</h1>
       <p style={{ color: "var(--muted)", margin: "6px 0 18px" }}>
         Viralidad y fiabilidad de cada noticia, las fuentes que la confirman y cómo se expande. Solo lo más viral y mejor verificado se genera y publica solo.
@@ -282,7 +284,7 @@ export default function FuentesPage() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
         {([["noticias", "📰 Noticias analizadas"], ["fuentes", `🏛 Fuentes (${fuentes.length})`], ["reglas", "🤖 Reglas automáticas"]] as const).map(([k, t]) => (
           <button key={k} onClick={() => setTab(k)}
             style={{ ...btnGhost, borderColor: tab === k ? "var(--accent)" : "var(--border)", color: tab === k ? "var(--text)" : "var(--muted)", fontWeight: tab === k ? 700 : 400 }}>

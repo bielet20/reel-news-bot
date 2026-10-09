@@ -17,6 +17,7 @@ output/
 # Datos de usuario (biblioteca, música, plantillas, uploads)
 _library/
 _music/
+_cursos/
 _templates/
 
 # Tokens OAuth de redes sociales (no subir a GitHub)
@@ -59,3 +60,10 @@ certs/*
 
 # macOS
 .DS_Store
+
+# Temporales y datos locales que no van al repo
+cookies.txt
+tmp*.txt
+ranked_news.json
+_staging/
+.proto_*.py

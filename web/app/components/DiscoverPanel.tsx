@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import NoticiaFila from "./NoticiaFila";
 
 interface Recencia {
   horas: number | null;
@@ -51,6 +52,23 @@ interface BatchItem {
   status: "pending" | "running" | "done" | "error";
   jobId?: string;
   errorMsg?: string;
+}
+
+// Noticia detectada por el scanner automático (las "Alertas virales" del Gestor)
+interface ScannerAlerta {
+  id: string;
+  titulo: string;
+  fuente: string;
+  score: number;
+  link: string;
+  gancho: string;
+  documentacion?: string;
+  verificadores?: string[];
+  estado_verificacion?: string;
+  item_id: string | null;
+  leido: boolean;
+  creado: string;
+  auto_generado: boolean;
 }
 
 interface IndexedArticle {
@@ -222,6 +240,78 @@ export default function DiscoverPanel({ onUsar }: Props) {
   const [indexList, setIndexList] = useState<IndexedArticle[]>([]);
   const [indexLoading, setIndexLoading] = useState(false);
   const [indexSearched, setIndexSearched] = useState(false);
+
+  // ── Alertas del scanner: se muestran al abrir, sin tener que buscar ──────
+  const [alertas, setAlertas] = useState<ScannerAlerta[]>([]);
+  const [alertasCargando, setAlertasCargando] = useState(true);
+  const [alertasSel, setAlertasSel] = useState<Set<string>>(new Set());
+  const [resultadosSel, setResultadosSel] = useState<Set<string>>(new Set());
+  const [leyendo, setLeyendo] = useState<Set<string>>(new Set());
+  const [aviso, setAviso] = useState("");
+
+  async function cargarAlertas() {
+    setAlertasCargando(true);
+    try {
+      const r = await fetch("/api/scanner/notifications");
+      const d = r.ok ? await r.json() : [];
+      setAlertas(Array.isArray(d) ? d : []);
+    } catch { /* sin scanner: la lista queda vacía */ } finally {
+      setAlertasCargando(false);
+    }
+  }
+
+  // Igual que en el Gestor: la noticia entra en su cola de generación
+  async function enviarAlGestor(lista: { titulo: string }[]) {
+    for (const n of lista) {
+      await fetch("/api/gestor/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo: "noticia", contenido: JSON.stringify(n), titulo: n.titulo }),
+      });
+    }
+    setAviso(`${lista.length} noticia${lista.length > 1 ? "s" : ""} añadida${lista.length > 1 ? "s" : ""} a la cola del Gestor.`);
+  }
+
+  // Las alertas solo traen título y enlace: se lee el artículo completo
+  // (queda indexado) y se carga en el formulario con su procedencia.
+  async function usarAlerta(a: ScannerAlerta) {
+    if (leyendo.has(a.link)) return;
+    setLeyendo((prev) => new Set(prev).add(a.link));
+    setError("");
+    try {
+      const res = await fetch("/api/articles/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: a.link, title: a.titulo, source: a.fuente, category: "general", score: a.score, summary: "" }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const art: IndexedArticle = await res.json();
+      const contenido = art.content.length > 3500 ? art.content.slice(0, 3497) + "…" : art.content;
+      setIndexedUrls((prev) => new Set(prev).add(a.link));
+      onUsar({
+        titulo: a.titulo, titulo_original: a.titulo, fuente: a.fuente, link: a.link,
+        resumen: contenido || art.summary || a.titulo, score: a.score, categoria: "general",
+        gancho: a.gancho, audiencia: "", documentacion: a.documentacion,
+        verificadores: a.verificadores, estado_verificacion: a.estado_verificacion,
+      });
+    } catch {
+      setError("No se pudo leer el artículo de esa alerta. Prueba en modo Artículo URL o envíala a la cola del Gestor.");
+    } finally {
+      setLeyendo((prev) => { const next = new Set(prev); next.delete(a.link); return next; });
+    }
+  }
+
+  function alternar(set: Set<string>, key: string): Set<string> {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    cargarAlertas();
+  }, []);
+
 
   // ── Selección para lote ────────────────────────────────────────────────
 
@@ -619,6 +709,133 @@ export default function DiscoverPanel({ onUsar }: Props) {
         </p>
       )}
 
+      {/* Resultados de la búsqueda — mismo patrón de fila que el Gestor */}
+      {noticias.length > 0 && (
+        <div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <p style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", margin: 0 }}>
+              Resultados ({noticias.length})
+            </p>
+            {resultadosSel.size > 0 && (
+              <button type="button"
+                onClick={async () => { await enviarAlGestor(noticias.filter((n) => resultadosSel.has(n.link))); setResultadosSel(new Set()); }}
+                className="text-xs px-3 py-1 rounded-lg font-semibold" style={{ background: "var(--accent)", color: "#fff" }}>
+                Añadir {resultadosSel.size} a la cola del Gestor
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {noticias.map((n) => {
+              const rec = recenciaLabel(n.recencia);
+              return (
+                <NoticiaFila
+                  key={n.link}
+                  titulo={n.titulo}
+                  fuente={n.origen || n.fuente}
+                  score={n.score}
+                  verificadores={n.verificadores}
+                  gancho={n.gancho}
+                  documentacion={n.documentacion}
+                  extraMeta={<>
+                    {rec && <span style={{ color: rec.color, fontWeight: 600 }}> · {rec.icon} {rec.label}</span>}
+                    {n.categoria && <span> · {CATEGORIAS[n.categoria] ?? "📰"} {n.categoria}</span>}
+                  </>}
+                  seleccionada={resultadosSel.has(n.link)}
+                  onToggle={() => setResultadosSel((prev) => alternar(prev, n.link))}
+                  acciones={
+                    <div style={{ display: "flex", gap: 5 }}>
+                      <button type="button" onClick={() => toggleGuardar(n)}
+                        title={isGuardada(n.link) ? "Quitar de guardadas" : "Guardar para más tarde"}
+                        className="text-xs px-2 py-1 rounded-lg"
+                        style={{ background: isGuardada(n.link) ? "#14532d" : "var(--surface2)", color: isGuardada(n.link) ? "#4ade80" : "var(--muted)", border: "1px solid var(--border)" }}>
+                        {isGuardada(n.link) ? "✓" : "💾"}
+                      </button>
+                      <button type="button" onClick={() => handleIndexar(n)}
+                        title="Leer artículo completo e indexar para futuras búsquedas"
+                        className="text-xs px-2 py-1 rounded-lg"
+                        style={{ background: indexedUrls.has(n.link) ? "#1e2a4a" : "var(--surface2)", color: indexedUrls.has(n.link) ? "#60a5fa" : "var(--muted)", border: "1px solid var(--border)", opacity: indexing.has(n.link) ? 0.6 : 1 }}>
+                        {indexing.has(n.link) ? "⟳" : indexedUrls.has(n.link) ? "📚✓" : "📚"}
+                      </button>
+                      <button type="button" onClick={() => onUsar(n)}
+                        className="text-xs px-2.5 py-1 rounded-lg font-semibold" style={{ background: "var(--accent)", color: "#fff" }}>
+                        Usar →
+                      </button>
+                    </div>
+                  }
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Alertas del scanner (lo mismo que "Alertas virales" en el Gestor) ── */}
+      <div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", margin: 0 }}>
+            Alertas virales del scanner ({alertas.length})
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {alertasSel.size > 0 && (
+              <button type="button"
+                onClick={async () => {
+                  await enviarAlGestor(alertas.filter((a) => alertasSel.has(a.id) && !a.auto_generado));
+                  setAlertasSel(new Set());
+                }}
+                className="text-xs px-3 py-1 rounded-lg font-semibold" style={{ background: "var(--accent)", color: "#fff" }}>
+                Añadir {alertasSel.size} a la cola del Gestor
+              </button>
+            )}
+            <button type="button" onClick={cargarAlertas}
+              className="text-xs px-2.5 py-1 rounded-lg"
+              style={{ background: "var(--surface2)", color: "var(--muted)", border: "1px solid var(--border)" }}>
+              {alertasCargando ? "⟳" : "↻ Actualizar"}
+            </button>
+          </div>
+        </div>
+        {aviso && (
+          <p className="text-xs px-3 py-2 rounded-lg mb-2" style={{ background: "#0a2a1a", color: "#4ade80", border: "1px solid #1a5a2a" }}>
+            ✓ {aviso} <a href="/gestor" style={{ color: "#4ade80", textDecoration: "underline" }}>Ver en el Gestor →</a>
+          </p>
+        )}
+        {!alertasCargando && alertas.length === 0 ? (
+          <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "16px 0" }}>
+            Sin alertas. El scanner notificará cuando detecte noticias virales (se configura en el Gestor).
+          </p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "min(calc(60vh / var(--zoom, 1)), 640px)", overflowY: "auto" }}>
+            {alertas.map((a) => (
+              <NoticiaFila
+                key={a.id}
+                titulo={a.titulo}
+                fuente={a.fuente}
+                score={a.score}
+                fecha={a.creado}
+                verificadores={a.verificadores}
+                gancho={a.gancho}
+                documentacion={a.documentacion}
+                atenuada={a.leido}
+                seleccionada={alertasSel.has(a.id)}
+                onToggle={a.auto_generado ? undefined : () => setAlertasSel((prev) => alternar(prev, a.id))}
+                pie={a.auto_generado && a.item_id ? (
+                  <a href="/gestor" style={{ fontSize: 11, color: "#4ade80", display: "block", marginTop: 2, textDecoration: "none" }}>
+                    En cola → ver en el Gestor
+                  </a>
+                ) : null}
+                acciones={!a.auto_generado && (
+                  <button type="button" onClick={() => usarAlerta(a)} disabled={leyendo.has(a.link)}
+                    title="Lee el artículo completo y lo carga en el formulario"
+                    className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+                    style={{ background: "var(--accent)", color: "#fff", opacity: leyendo.has(a.link) ? 0.6 : 1, cursor: leyendo.has(a.link) ? "wait" : "pointer" }}>
+                    {leyendo.has(a.link) ? "⟳ Leyendo…" : "Usar →"}
+                  </button>
+                )}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* ── Noticias guardadas ──────────────────────────────────────────── */}
       {savedNews.length > 0 && (
         <div className="rounded-xl overflow-hidden"
@@ -974,113 +1191,6 @@ export default function DiscoverPanel({ onUsar }: Props) {
         )}
       </div>
 
-      {noticias.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-xs" style={{ color: "var(--muted)" }}>
-            {noticias.length} propuestas ordenadas por potencial viral — haz clic en &quot;Usar&quot; o &quot;💾&quot; para guardar
-          </p>
-          {noticias.map((n, i) => {
-            const sl = scoreLabel(n.score);
-            const cat = CATEGORIAS[n.categoria] ?? "📰";
-            const rec = recenciaLabel(n.recencia);
-            return (
-              <div
-                key={i}
-                className="rounded-xl p-4 space-y-2"
-                style={{ background: "var(--surface)", border: `1px solid ${n.recencia?.muy_reciente && rec ? rec.color : sl.color}30` }}
-              >
-                {/* Header */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                      style={{ background: sl.bg, color: sl.color, border: `1px solid ${sl.color}40` }}>
-                      {sl.emoji} {n.score} — {sl.label}
-                    </span>
-                    {rec && (
-                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
-                        style={{ background: rec.bg, color: rec.color, border: `1px solid ${rec.color}50` }}>
-                        {rec.icon} {rec.label}
-                      </span>
-                    )}
-                    <span className="text-xs px-2 py-0.5 rounded-full"
-                      style={{ background: "var(--surface2)", color: "var(--muted)" }}>
-                      {cat} {n.categoria}
-                    </span>
-                    {(n.origen || n.fuente) && (
-                      <span className="text-xs flex items-center gap-1" style={{ color: "var(--muted)" }}>
-                        {n.fuente_verificada && <span style={{ color: "#4ade80" }}>✓</span>}
-                        {etiquetaFuente(n) || n.fuente}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => toggleGuardar(n)}
-                      title={isGuardada(n.link) ? "Quitar de guardadas" : "Guardar para más tarde"}
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                      style={{
-                        background: isGuardada(n.link) ? "#14532d" : "var(--surface2)",
-                        color: isGuardada(n.link) ? "#4ade80" : "var(--muted)",
-                        border: `1px solid ${isGuardada(n.link) ? "#4ade8040" : "var(--border)"}`,
-                      }}
-                    >
-                      {isGuardada(n.link) ? "✓ Guardada" : "💾"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleIndexar(n)}
-                      title="Leer artículo completo e indexar para futuras búsquedas"
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                      style={{
-                        background: indexedUrls.has(n.link) ? "#1e2a4a" : "var(--surface2)",
-                        color: indexedUrls.has(n.link) ? "#60a5fa" : "var(--muted)",
-                        border: `1px solid ${indexedUrls.has(n.link) ? "#3b82f640" : "var(--border)"}`,
-                        opacity: indexing.has(n.link) ? 0.6 : 1,
-                      }}
-                    >
-                      {indexing.has(n.link) ? "⟳" : indexedUrls.has(n.link) ? "📚✓" : "📚"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUsar(n)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                      style={{ background: "var(--accent)", color: "#fff" }}
-                    >
-                      Usar →
-                    </button>
-                  </div>
-                </div>
-
-                {/* Título */}
-                <p className="text-sm font-medium leading-snug" style={{ color: "var(--text)" }}>
-                  {n.titulo}
-                </p>
-
-                {/* Gancho + audiencia */}
-                {n.gancho && (
-                  <p className="text-xs" style={{ color: "#a78bfa" }}>
-                    💡 {n.gancho}
-                  </p>
-                )}
-                {n.audiencia && (
-                  <p className="text-xs" style={{ color: "var(--muted)" }}>
-                    👥 {n.audiencia}
-                  </p>
-                )}
-
-                {/* Resumen colapsable si hay */}
-                {n.resumen && (
-                  <p className="text-xs line-clamp-2" style={{ color: "var(--muted)" }}>
-                    {n.resumen}
-                  </p>
-                )}
-                <ProvenanceBlock n={n} />
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

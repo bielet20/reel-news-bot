@@ -1,5 +1,10 @@
 # Reel News Bot
 
+> 📘 **Manual completo de la aplicación web** (arranque, estado de los servicios, cada sección,
+> Cursos y formaciones, solución de problemas): **[docs/MANUAL.md](docs/MANUAL.md)**.
+> Arranque: `docker compose up -d` → http://localhost:3000. Lo que sigue documenta el uso por
+> línea de comandos (`main.py`).
+
 Sistema en Python que genera automaticamente reels/shorts verticales
 (1080x1920, Instagram Reels / TikTok / YouTube Shorts, maximo 60 segundos) a
 partir de tres tipos de fuente:

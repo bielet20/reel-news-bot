@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import ZoomControl from "./components/ZoomControl";
+import EstadoMac from "./components/EstadoMac";
+import MonitorCarga from "./components/MonitorCarga";
 
 export const metadata: Metadata = {
   title: "Reel News Bot",
@@ -25,6 +27,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           alignItems: "center",
           gap: 4,
           height: 56,
+          overflowX: "auto",
+          whiteSpace: "nowrap",
           position: "sticky",
           top: 0,
           zIndex: 100,
@@ -35,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             color: "var(--accent)",
             textDecoration: "none",
             marginRight: 12,
+            flexShrink: 0,
           }}>
             🎬 Reel News Bot
           </Link>
@@ -42,12 +47,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <NavLink href="/gestor">Gestor</NavLink>
           <NavLink href="/montaje">Montaje</NavLink>
           <NavLink href="/fuentes">Fuentes</NavLink>
+          <NavLink href="/redes">Centro de Redes</NavLink>
           <NavLink href="/canales">Canales</NavLink>
+          <NavLink href="/conexiones">Conexiones</NavLink>
           <NavLink href="/tiktok">TikTok</NavLink>
           <NavLink href="/library">Biblioteca</NavLink>
           <NavLink href="/music">Música</NavLink>
+          <NavLink href="/cursos">Cursos</NavLink>
           <NavLink href="/settings">Settings</NavLink>
           <ZoomControl />
+          <EstadoMac />
+          <MonitorCarga />
         </nav>
         {children}
       </body>
@@ -63,6 +73,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
       textDecoration: "none",
       padding: "8px 12px",
       borderRadius: 7,
+      flexShrink: 0,
     }}>
       {children}
     </Link>

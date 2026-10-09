@@ -11,6 +11,7 @@ const DEFECTO = 1.2;
 const CLAVE = "ui_zoom";
 
 function aplicar(z: number) {
+  document.documentElement.style.setProperty("--zoom", String(z));
   document.documentElement.style.setProperty("zoom", String(z));
 }
 

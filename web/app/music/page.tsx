@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import AvisoServicios from "../components/AvisoServicios";
 
 interface MusicItem {
   id: string;
@@ -80,7 +81,8 @@ export default function MusicPage() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)", padding: "24px 20px", maxWidth: 1000, margin: "0 auto" }}>
+    <div className="page-wrap" style={{ minHeight: "calc(100vh / var(--zoom, 1))", background: "var(--bg)", color: "var(--text)", paddingTop: 24, paddingBottom: 24 }}>
+      <AvisoServicios seccion="musica" />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
         <a href="/" style={{ color: "var(--muted)", textDecoration: "none", fontSize: 13 }}>← Volver</a>

@@ -139,7 +139,7 @@ export default function PublishModal({
       <div style={{
         background: "var(--surface)", border: "1px solid var(--border)",
         borderRadius: 18, width: "100%", maxWidth: 460,
-        maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden",
+        maxHeight: "calc(90vh / var(--zoom, 1))", display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
         {/* Header */}
         <div style={{ padding: "18px 20px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

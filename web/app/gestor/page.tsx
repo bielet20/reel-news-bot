@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import AvisoServicios from "../components/AvisoServicios";
+import { BarraProgresoJob } from "../components/BarraProgreso";
 
 // ── Scanner types ──────────────────────────────────────────────────────────────
 
@@ -13,7 +15,14 @@ interface ScannerConfig {
   publish_platforms: string[];
   pais: string;
   n_noticias: number;
+  nicho?: string[];
+  max_horas?: number;
 }
+
+interface NichoOpcion { id: string; label: string }
+
+// Nicho recomendado para un canal de noticias rápidas de ciencia y tecnología
+const NICHO_CIENCIA_TECH = ["ciencia", "tecnologia", "ia", "salud", "espacio", "tiempo"];
 
 interface ScannerStatus {
   config: ScannerConfig;
@@ -39,6 +48,9 @@ interface ScannerNotif {
   leido: boolean;
   creado: string;
   auto_generado: boolean;
+  // Avisos de publicación (tipo "publicado" / "publicacion_fallida")
+  subidas?: Record<string, string>;
+  fallos?: Record<string, string>;
 }
 
 const SCANNER_CONFIG_DEFAULT: ScannerConfig = {
@@ -107,6 +119,10 @@ interface AutoPubStatus {
   paused: boolean;
   daily_limit: number;
   published_today: number;
+  dia?: string;
+  franja?: string;
+  en_franja?: boolean;
+  intervalo_min?: number;
   queue_size: number;
   queue: { item_id: string; score: number; titulo: string; platforms: string[] }[];
   last_publish_at: string | null;
@@ -148,7 +164,7 @@ const PREFS_DEFAULT: GenerationPrefs = {
   servicio_voz: "edge-tts",
   voz: "es-ES-AlvaroNeural",
   tipo_contenido: "noticia",
-  duracion_maxima: 60,
+  duracion_maxima: 30,
   mostrar_subtitulos: true,
   mostrar_titulo: true,
   marca: "",
@@ -456,7 +472,7 @@ function PublishSheet({
       <div style={{
         background: "var(--surface)", border: "1px solid var(--border)",
         borderRadius: 18, width: "100%", maxWidth: 460,
-        maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden",
+        maxHeight: "calc(90vh / var(--zoom, 1))", display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
         <div style={{ padding: "18px 20px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -861,6 +877,10 @@ export default function GestorPage() {
   const [scannerSaving, setScannerSaving] = useState(false);
   const [scannerRunning, setScannerRunning] = useState(false);
   const [notifs, setNotifs] = useState<ScannerNotif[]>([]);
+  const [nichos, setNichos] = useState<NichoOpcion[]>([]);
+  useEffect(() => {
+    fetch("/api/scanner/nichos").then((r) => r.json()).then(setNichos).catch(() => {});
+  }, []);
   const [notifsOpen, setNotifsOpen] = useState(false);
   const [notifSelected, setNotifSelected] = useState<Set<string>>(new Set());
   const [ytNotifSelected, setYtNotifSelected] = useState<Set<string>>(new Set());
@@ -1656,7 +1676,8 @@ export default function GestorPage() {
   const unreadCount = notifs.filter((n) => !n.leido).length;
 
   return (
-    <main style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 16px 60px" }}>
+    <main className="page-wrap" style={{ paddingTop: 28, paddingBottom: 60 }}>
+      <AvisoServicios seccion="gestor" />
       {/* ── HEADER ── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>
         <div>
@@ -1712,6 +1733,21 @@ export default function GestorPage() {
         </div>
       </div>
 
+      {/* ── EN PRODUCCIÓN: progreso de los reels que se están generando ── */}
+      {items.some((i) => i.estado === "generating" && i.job_id) && (
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 16px", marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)" }}>En producción</span>
+            {items.some((i) => i.estado === "queued") && (
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{items.filter((i) => i.estado === "queued").length} en cola</span>
+            )}
+          </div>
+          {items.filter((i) => i.estado === "generating" && i.job_id).map((i) => (
+            <BarraProgresoJob key={i.id} jobId={i.job_id!} titulo={i.titulo || truncate(i.contenido, 80)} />
+          ))}
+        </div>
+      )}
+
       {/* ── NOTIFICACIONES PANEL ── */}
       {notifsOpen && (
         <div style={{
@@ -1720,7 +1756,7 @@ export default function GestorPage() {
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
             <p style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", margin: 0 }}>
-              Alertas virales ({notifs.length})
+              Alertas y publicaciones ({notifs.length})
             </p>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {notifSelected.size > 0 && (
@@ -1756,6 +1792,32 @@ export default function GestorPage() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 340, overflowY: "auto" }}>
               {notifs.map((n) => {
+                if (n.tipo === "publicado" || n.tipo === "publicacion_fallida") {
+                  const ok = n.tipo === "publicado" && !Object.keys(n.fallos ?? {}).length;
+                  const color = n.tipo === "publicacion_fallida" ? "#f87171" : ok ? "#4ade80" : "#fbbf24";
+                  return (
+                    <div key={n.id} style={{
+                      padding: "11px 14px", borderRadius: 12, background: "var(--surface2)",
+                      border: `1px solid ${n.leido ? "var(--border)" : color}`, opacity: n.leido ? 0.75 : 1,
+                    }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, margin: 0, color }}>
+                        {n.tipo === "publicacion_fallida" ? "❌ No se pudo publicar" : ok ? "✅ Publicado" : "⚠️ Publicado a medias"}
+                        <span style={{ color: "var(--muted)", fontWeight: 400 }}> · {fmtDate(n.creado)}</span>
+                      </p>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: "3px 0 0", color: "var(--text)", lineHeight: 1.3 }}>{n.titulo}</p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+                        {Object.entries(n.subidas ?? {}).map(([p, url]) => (
+                          <span key={p} style={{ fontSize: 11, color: "var(--text)" }}>
+                            {p}: {url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>{url}</a> : "subido"}
+                          </span>
+                        ))}
+                        {Object.entries(n.fallos ?? {}).map(([p, err]) => (
+                          <span key={p} style={{ fontSize: 11, color: "#f87171" }}>{p}: falló — {err}</span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
                 const isSel = notifSelected.has(n.id);
                 return (
                 <div key={n.id} style={{
@@ -2240,6 +2302,45 @@ export default function GestorPage() {
               </div>
             </div>
 
+            {/* Nicho del canal */}
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <Label>Nicho del canal {(scannerConfig.nicho ?? []).length === 0 ? "(sin filtro: de todo)" : ""}</Label>
+                <button
+                  onClick={() => setScannerConfig({ ...scannerConfig, nicho: NICHO_CIENCIA_TECH })}
+                  style={{ ...btnSecondary, fontSize: 11, padding: "3px 10px" }}>
+                  Ciencia, tech, salud, espacio y tiempo
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                {nichos.map((o) => {
+                  const actual = scannerConfig.nicho ?? [];
+                  const sel = actual.includes(o.id);
+                  return (
+                    <button key={o.id}
+                      onClick={() => setScannerConfig({
+                        ...scannerConfig,
+                        nicho: sel ? actual.filter((x) => x !== o.id) : [...actual, o.id],
+                      })}
+                      style={{
+                        fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999, cursor: "pointer",
+                        background: sel ? "rgba(99,102,241,0.15)" : "var(--surface2)",
+                        border: `1px solid ${sel ? "var(--accent)" : "var(--border)"}`,
+                        color: sel ? "var(--accent)" : "var(--muted)",
+                      }}>
+                      {sel ? "✓ " : ""}{o.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <Label>Solo última hora: noticias de hace menos de {scannerConfig.max_horas ?? 12} h</Label>
+                <input type="range" min={1} max={48} step={1} value={scannerConfig.max_horas ?? 12}
+                  onChange={(e) => setScannerConfig({ ...scannerConfig, max_horas: Number(e.target.value) })}
+                  style={{ width: "100%", accentColor: "var(--accent)" }} />
+              </div>
+            </div>
+
             {/* Noticias por scan + país */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
@@ -2374,7 +2475,7 @@ export default function GestorPage() {
                 fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 5,
                 background: "rgba(251,146,60,0.1)", color: "#fb923c",
               }}>
-                {autoPubStatus.published_today}/{autoPubStatus.daily_limit} hoy
+                {autoPubStatus.published_today}/{autoPubStatus.daily_limit} hoy{autoPubStatus.dia ? ` (${autoPubStatus.dia.slice(8, 10)}/${autoPubStatus.dia.slice(5, 7)})` : ""}
               </span>
               <span style={{ color: "var(--muted)", fontSize: 13 }}>{autoPubOpen ? "▲" : "▼"}</span>
             </div>
@@ -2386,7 +2487,7 @@ export default function GestorPage() {
               {/* Barra de progreso diaria */}
               <div style={{ marginTop: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <Label>Publicados hoy</Label>
+                  <Label>Publicados hoy{autoPubStatus.dia ? ` (${autoPubStatus.dia.slice(8, 10)}/${autoPubStatus.dia.slice(5, 7)})` : ""} · se reinicia a medianoche{autoPubStatus.franja ? ` · publica de ${autoPubStatus.franja}${autoPubStatus.intervalo_min ? `, cada ~${autoPubStatus.intervalo_min} min` : ""}${autoPubStatus.en_franja === false ? " (fuera de horario)" : ""}` : ""}</Label>
                   <span style={{ fontSize: 12, color: "var(--text)" }}>
                     {autoPubStatus.published_today} / {autoPubStatus.daily_limit}
                   </span>
@@ -2795,7 +2896,7 @@ export default function GestorPage() {
               </div>
               <div>
                 <Label>Duración máxima: {prefs.duracion_maxima}s</Label>
-                <input type="range" min={20} max={90} step={5} value={prefs.duracion_maxima}
+                <input type="range" min={10} max={60} step={5} value={prefs.duracion_maxima}
                   onChange={(e) => setPrefs({ ...prefs, duracion_maxima: Number(e.target.value) })}
                   style={{ width: "100%", accentColor: "var(--accent)", marginTop: 6 }} />
               </div>
@@ -2981,8 +3082,8 @@ export default function GestorPage() {
         const uploadedCount = items.filter(i => i.uploads && Object.keys(i.uploads).length > 0).length;
         return (
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Archivo de noticias</span>
               {archiveItems.length > 0 && (
                 <span style={{ fontSize: 11, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, padding: "2px 6px" }}>
@@ -2991,7 +3092,7 @@ export default function GestorPage() {
               )}
               <span style={{ fontSize: 11, color: "#94a3b8" }}>Auto-limpieza: archiva y borra del disco los subidos con más de 7 días</span>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <button onClick={() => { setArchiveOpen(v => !v); if (!archiveOpen) fetchArchive(); }}
                 style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>
                 {archiveOpen ? "Cerrar" : "Ver archivo"}
@@ -3296,7 +3397,7 @@ export default function GestorPage() {
                   transition: "background 0.4s, border-color 0.4s",
                 }}>
                   {/* ── Fila principal ── */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "11px 14px" }}>
                     {/* Checkbox para items pendientes */}
                     {item.estado === "pending" && (
                       <input
@@ -3315,7 +3416,7 @@ export default function GestorPage() {
                     </span>
 
                     {/* Título */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: "1 1 180px", minWidth: 0 }}>
                       <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {item.titulo || truncate(item.contenido, 60)}
                       </p>
@@ -3399,7 +3500,7 @@ export default function GestorPage() {
                     </span>
 
                     {/* Acciones */}
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 6, marginLeft: "auto" }}>
                       {item.estado === "ready" && item.output_file && (
                         <button
                           onClick={() => setPreviewFile((f) => f === item.output_file ? null : item.output_file!)}
@@ -3518,6 +3619,13 @@ export default function GestorPage() {
                       }} title="Eliminar item">✕</button>
                     </div>
                   </div>
+
+                  {/* ── Barra de progreso de producción ── */}
+                  {item.estado === "generating" && item.job_id && (
+                    <div style={{ padding: "0 14px 10px" }}>
+                      <BarraProgresoJob jobId={item.job_id} compacta />
+                    </div>
+                  )}
 
                   {/* ── Reproductor inline ── */}
                   {previewFile === item.output_file && item.output_file && (

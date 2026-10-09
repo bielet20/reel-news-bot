@@ -8,19 +8,25 @@ import json
 import os
 
 
-def buscar_y_curar(tema=None, pais="ES", variado=True, n_buscar=30, n_retornar=8):
+def buscar_y_curar(tema=None, pais="ES", variado=True, n_buscar=30, n_retornar=8,
+                   nicho=None, max_horas=24):
     """
     Busca noticias de fuentes confiables y devuelve las mejores ordenadas por score.
+    Con `nicho` (lista de categorías de news_fetcher.NICHOS_DISPONIBLES) solo
+    mira esas categorías y solo noticias de las últimas `max_horas`.
 
     Retorna lista de dicts:
       titulo, titulo_original, fuente, link, resumen,
       score (0-10), categoria, gancho, audiencia,
       fecha, recencia, fuente_verificada
     """
-    candidatos = _recopilar(tema, pais, variado, n_buscar)
+    if nicho:
+        candidatos = _recopilar_nicho(nicho, max_horas, n_buscar)
+    else:
+        candidatos = _recopilar(tema, pais, variado, n_buscar)
     if not candidatos:
         return []
-    resultado = _curar_con_ia(candidatos, n_retornar, tema)
+    resultado = _curar_con_ia(candidatos, n_retornar, tema, nicho=nicho)
     # Cobertura real: quién más publica cada candidata (Google News, medios
     # fiables) y fiabilidad recalculada con esas confirmaciones
     try:
@@ -86,7 +92,21 @@ def _recopilar(tema, pais, variado, n):
         return []
 
 
-def _curar_con_ia(noticias, n, tema=None):
+def _recopilar_nicho(nicho, max_horas, n):
+    from news_fetcher import buscar_nicho
+    try:
+        return buscar_nicho(list(nicho), max_horas=max_horas)[:n]
+    except Exception as e:
+        print(f"[curator] Error buscando noticias del nicho: {e}")
+        return []
+
+
+# Categorías que el modelo puede devolver y no encajan en ningún nicho de
+# ciencia/tecnología: si el canal no las ha elegido, se descartan
+_CATEGORIAS_FUERA_DE_NICHO = {"politica", "deportes", "entretenimiento", "mundo", "economia", "cripto"}
+
+
+def _curar_con_ia(noticias, n, tema=None, nicho=None):
     """Evalúa noticias con Claude y devuelve las top-n rankeadas."""
     from llm_local import completar, nube_permitida
     client = None
@@ -97,16 +117,18 @@ def _curar_con_ia(noticias, n, tema=None):
         except ImportError:
             client = None
 
-    lista_txt = "\n\n".join(
+    # Compacto: el modelo local (LM Studio) tiene un contexto limitado y con
+    # 40 noticias con HTML y procedencia completa no cabía (error 400)
+    import re as _re
+    lista_txt = "NIVEL de fuente: 1=agencia/ciencia, 2=prensa, 3=especialista, 4=alerta/PR\n\n" + "\n\n".join(
         f"{i+1}. TÍTULO: {item['titulo']}\n"
         f"   FUENTE: {item.get('fuente', '—')}"
         f"{' ✓VERIFICADA' if item.get('fuente_verificada') else ''}"
-        f"{' ✓CONFIRMADA ' + str(item.get('n_fuentes', 1)) + ' medios' if item.get('confirmada') else ' (1 medio)'}\n"
-        f"   NIVEL: {item.get('nivel_fuente', 3)} (1=agencia/ciencia, 2=prensa, 3=especialista, 4=alerta/PR)\n"
-        f"   MEDIOS: {', '.join(item.get('fuentes_confirmacion') or [item.get('fuente', '—')])}\n"
-        f"   PROCEDENCIA: {item.get('documentacion', '')}\n"
+        f"{' ✓CONFIRMADA ' + str(item.get('n_fuentes', 1)) + ' medios' if item.get('confirmada') else ' (1 medio)'}"
+        f" · NIVEL {item.get('nivel_fuente', 3)}\n"
+        f"   MEDIOS: {', '.join((item.get('fuentes_confirmacion') or [item.get('fuente', '—')])[:5])}\n"
         f"   RECENCIA: {item.get('recencia', {}).get('label', 'desconocida')}\n"
-        f"   RESUMEN: {(item.get('resumen') or '')[:200]}"
+        f"   RESUMEN: {_re.sub(r'<[^>]+>', ' ', item.get('resumen') or '').strip()[:160]}"
         for i, item in enumerate(noticias)
     )
 
@@ -116,6 +138,15 @@ def _curar_con_ia(noticias, n, tema=None):
         f"Solo selecciona noticias donde '{tema}' sea el tema central o muy relevante.\n"
         if tema else ""
     )
+
+    if nicho:
+        from news_fetcher import NICHOS_DISPONIBLES
+        temas_nicho = ", ".join(NICHOS_DISPONIBLES.get(c, c) for c in nicho)
+        filtro_tema += (
+            f"\nNICHO DEL CANAL: noticias de ÚLTIMA HORA de {temas_nicho}.\n"
+            f"DESCARTA todo lo que no sea de estos temas (política, sucesos, famosos, deportes, "
+            f"economía...) aunque sea viral. Entre dos noticias parecidas elige SIEMPRE la más reciente.\n"
+        )
 
     prompt = f"""Eres experto en contenido viral para YouTube Shorts en español. Tu referencia es MrBeast: títulos cortos, cifras exactas, preguntas directas al espectador.
 Analiza estas {len(noticias)} noticias y selecciona las {n} con MAYOR potencial viral.
@@ -153,7 +184,7 @@ Devuelve SOLO este JSON (sin texto adicional, sin markdown):
       "indice": <número 1-{len(noticias)}>,
       "titulo_reel": "<título viral máx 60 chars siguiendo fórmulas MrBeast>",
       "score": <número 1-10 con un decimal>,
-      "categoria": "<tecnologia|ia|economia|mundo|politica|ciencia|salud|deportes|entretenimiento|cripto>",
+      "categoria": "<tecnologia|ia|economia|mundo|politica|ciencia|salud|espacio|tiempo|deportes|entretenimiento|cripto>",
       "gancho": "<por qué captará atención en 1 frase breve>",
       "audiencia": "<perfil de audiencia en 1 frase muy corta>"
     }}
@@ -187,6 +218,10 @@ Ordena por score descendente."""
             idx = item["indice"] - 1
             if 0 <= idx < len(noticias):
                 orig = noticias[idx]
+                cat = item.get("categoria", "general")
+                if nicho and cat in _CATEGORIAS_FUERA_DE_NICHO and cat not in nicho:
+                    print(f"[curator] fuera del nicho ({cat}): {orig['titulo'][:60]}")
+                    continue
                 link_real = _resolver_url(orig.get("link", ""))
                 resultado.append({
                     "titulo": item.get("titulo_reel", orig["titulo"]),

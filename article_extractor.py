@@ -6,6 +6,7 @@ Tambien permite extraer titulo + fuente de una URL suelta (para cuando el
 usuario pega un link de un articulo en vez de buscar por tema).
 """
 
+import re
 import time
 import urllib.parse
 
@@ -163,6 +164,44 @@ def _descargar_con_playwright(url: str, timeout: int = 20) -> str:
         return html
 
 
+def _texto_cuerpo_estructurado(html: str) -> str:
+    """Cuerpo del artículo desde los datos estructurados de la página
+    (JSON-LD "articleBody" o el elemento itemprop="articleBody"), SIN pasar
+    por _limpiar_soup. Europa Press (2026-09-27) marca el cuerpo con clases
+    que la limpieza toma por basura/paywall y solo quedaban 13 palabras,
+    aunque el texto completo estaba en la página."""
+    import json as _json
+    soup = BeautifulSoup(html, "html.parser")
+    mejor = ""
+
+    def _buscar(obj):
+        nonlocal mejor
+        if isinstance(obj, dict):
+            cuerpo = obj.get("articleBody")
+            if isinstance(cuerpo, str) and len(cuerpo) > len(mejor):
+                mejor = cuerpo
+            for v in obj.values():
+                _buscar(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                _buscar(v)
+
+    for s in soup.find_all("script", type="application/ld+json"):
+        try:
+            _buscar(_json.loads(s.string or s.get_text() or ""))
+        except (ValueError, TypeError):
+            continue
+    el = soup.find(attrs={"itemprop": "articleBody"})
+    if el:
+        texto_el = "\n".join(p.get_text(" ", strip=True) for p in el.find_all("p")) \
+            or el.get_text(" ", strip=True)
+        if len(texto_el) > len(mejor):
+            mejor = texto_el
+    if "<" in mejor:
+        mejor = BeautifulSoup(mejor, "html.parser").get_text(" ")
+    return re.sub(r"[ \t]+", " ", mejor).strip()
+
+
 def extraer_texto(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> str:
     """
     Descarga la pagina y concatena los parrafos <p> con texto sustancial.
@@ -173,6 +212,9 @@ def extraer_texto(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> str
         html = _descargar(url, timeout=timeout)
         soup = BeautifulSoup(html, "html.parser")
         texto = _extraer_parrafos(soup, min_len_parrafo)
+        estructurado = _texto_cuerpo_estructurado(html)
+        if len(estructurado.split()) > len(texto.split()):
+            texto = estructurado
 
         # Twitter/X: todo es JS, el tweet está en og:description
         if _es_twitter(url) and len(texto.split()) < 30:
@@ -373,6 +415,9 @@ def extraer_articulo(url: str, timeout: int = 10, min_len_parrafo: int = 40) -> 
     url_autor = _extraer_url_autor(url, soup)
 
     texto = _extraer_parrafos(soup, min_len_parrafo)
+    estructurado = _texto_cuerpo_estructurado(html)
+    if len(estructurado.split()) > len(texto.split()):
+        texto = estructurado
 
     # Twitter/X carga todo con JS — los <p> no tienen el tweet.
     # og:description sí tiene el texto completo del tweet.

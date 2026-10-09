@@ -197,9 +197,16 @@ def apta_auto(item: dict, reglas: dict) -> tuple[bool, list[str]]:
         motivos.append("viralidad estimada sin IA (el modelo no respondió)")
     if float(item.get("score", 0) or 0) < float(reglas.get("score_min", 7.5)):
         motivos.append(f"viralidad {item.get('score', 0)} < {reglas.get('score_min', 7.5)}")
-    if int(item.get("fiabilidad", 0) or 0) < int(reglas.get("fiabilidad_min", 70)):
-        motivos.append(f"fiabilidad {item.get('fiabilidad', 0)} < {reglas.get('fiabilidad_min', 70)}")
-    if int(item.get("n_medios", 1) or 1) < int(reglas.get("min_medios", 2)):
+    # Última hora: una fuente primaria de nivel 1 (agencia, NASA, ESA, Nature,
+    # OMS...) suele ser la única durante las primeras horas. Sola da 65
+    # ("Fiable" en la escala), así que para ellas basta con eso y 1 medio
+    primaria = reglas.get("nivel1_basta", True) and int(item.get("nivel_fuente", 3) or 3) <= 1
+    fiab_min = int(reglas.get("fiabilidad_min", 70))
+    if primaria:
+        fiab_min = min(fiab_min, 65)
+    if int(item.get("fiabilidad", 0) or 0) < fiab_min:
+        motivos.append(f"fiabilidad {item.get('fiabilidad', 0)} < {fiab_min}")
+    if not primaria and int(item.get("n_medios", 1) or 1) < int(reglas.get("min_medios", 2)):
         motivos.append(f"{item.get('n_medios', 1)} medio(s) < {reglas.get('min_medios', 2)} exigidos")
     if reglas.get("excluir_nivel4", True) and int(item.get("nivel_fuente", 3) or 3) >= 4:
         motivos.append("origen de nivel 4 (alerta/PR)")

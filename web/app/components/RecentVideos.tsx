@@ -157,7 +157,7 @@ export default function RecentVideos() {
               ref={videoRef}
               src={`/videos/${selected}`}
               controls
-              className="w-full max-h-[600px] mx-auto block"
+              className="w-full max-h-[calc(62vh/var(--zoom,1))] mx-auto block"
               style={{ background: "#000" }}
             />
             <HotspotOverlay filename={selected} videoRef={videoRef} />
@@ -169,14 +169,14 @@ export default function RecentVideos() {
         {videos.map((v) => (
           <div
             key={v.filename}
-            className="flex items-center justify-between rounded-xl px-4 py-3 cursor-pointer transition-all"
+            className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl px-4 py-3 cursor-pointer transition-all"
             style={{
               background: selected === v.filename ? "var(--surface2)" : "var(--surface)",
               border: `1px solid ${selected === v.filename ? "var(--accent)" : "var(--border)"}`,
             }}
             onClick={() => setSelected(selected === v.filename ? null : v.filename)}
           >
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
               {v.cover ? (
                 <a href={`/videos/${encodeURIComponent(v.cover)}?v=${coverVer}`} target="_blank" rel="noreferrer"
                    onClick={(e) => e.stopPropagation()} title="Ver portada">
@@ -197,7 +197,7 @@ export default function RecentVideos() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-2 ml-3 shrink-0">
+            <div className="flex flex-wrap justify-end gap-2 ml-auto">
               {v.narrado && !v.video_ia && (
                 <button
                   onClick={(e) => { e.stopPropagation(); if (videoIa[v.filename] !== "generando") pasarAVideoIa(v.filename); }}

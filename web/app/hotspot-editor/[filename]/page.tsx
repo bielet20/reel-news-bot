@@ -9,8 +9,8 @@ export default function HotspotEditorPage() {
   const decoded = decodeURIComponent(filename);
 
   return (
-    <main className="min-h-screen px-4 py-8">
-      <div className="max-w-5xl mx-auto">
+    <main className="min-h-screen py-8">
+      <div className="page-wrap">
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
           <Link href="/" style={{ color: "var(--muted)", fontSize: 13 }}>← Inicio</Link>
           <h1 style={{ color: "var(--text)", fontSize: 18, fontWeight: 700, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

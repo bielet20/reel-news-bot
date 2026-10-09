@@ -71,6 +71,10 @@ from api.autopublisher import router as autopublisher_router
 from api.tiktok_post import router as tiktok_post_router
 from api.fuentes_api import router as fuentes_router
 from api.distribucion import router as distribucion_router
+from api.cursos import router as cursos_router
+from api.conexiones import router as conexiones_router
+from api.redes import router as redes_router
+from api.sistema import router as sistema_router, preparar_arranque
 app.include_router(admin_router)
 app.include_router(credentials_router)
 app.include_router(hotspots_router)
@@ -91,6 +95,17 @@ app.include_router(autopublisher_router)
 app.include_router(tiktok_post_router)
 app.include_router(fuentes_router)
 app.include_router(distribucion_router)
+app.include_router(cursos_router)
+app.include_router(conexiones_router)
+app.include_router(redes_router)
+app.include_router(sistema_router)
+
+
+@app.on_event("startup")
+def _al_arrancar():
+    # Carpetas de datos, librerías que falten (se instalan solas) e informe
+    # del estado de cada servicio en el log. Ver api/sistema.py.
+    preparar_arranque()
 
 app.add_middleware(
     CORSMiddleware,
@@ -164,7 +179,7 @@ class GenerateRequest(BaseModel):
     cookies_browser: Optional[str] = None
     artista: Optional[str] = None
     tema: Optional[str] = None
-    duracion_maxima: int = 60
+    duracion_maxima: int = 30
     # Imágenes de fondo
     imagenes_subidas: list = []
     generar_imagenes_ai: bool = False
@@ -198,7 +213,7 @@ class GenerateRequest(BaseModel):
     # Video largo (7-10 min, 4 actos)
     largo: bool = False
     # Portada vertical + miniatura con IA local (Flux): +3-6 min por reel
-    portada_ia: bool = False
+    portada_ia: bool = True   # portada IA por defecto en todos los reels
     # Fondos de vídeo en movimiento con IA local (Flux + LTX): ~15 min por reel
     video_ia: bool = False
 
@@ -467,6 +482,24 @@ register_create_job(_create_job)
 def generate(req: GenerateRequest, background_tasks: BackgroundTasks):
     job_id = _create_job(req.model_dump())
     return {"job_id": job_id}
+
+
+@app.get("/api/llm/estado")
+def llm_estado():
+    """¿Responde el LM Studio del Mac? Lo usa el indicador de la barra superior."""
+    from llm_local import llm_responde, LLM_BASE_URL
+    return {"ok": llm_responde(timeout=4), "url": LLM_BASE_URL}
+
+
+@app.post("/api/llm/despertar")
+def llm_despertar():
+    """Botón del indicador: intenta despertar el LM Studio del Mac."""
+    from llm_local import asegurar_llm, LLMNoDisponible
+    try:
+        asegurar_llm()
+        return {"ok": True, "msg": "LM Studio del Mac listo"}
+    except LLMNoDisponible as e:
+        return {"ok": False, "msg": str(e)}
 
 
 @app.get("/api/jobs")

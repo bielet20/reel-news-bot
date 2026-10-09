@@ -226,7 +226,8 @@ def _titulo_es_desde_guion(guion_texto: str, max_chars: int = 90) -> str:
 
 
 def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
-                         atribucion: dict = None) -> dict:
+                         atribucion: dict = None, titulo_es: str = "",
+                         guion_texto: str = "") -> dict:
     """
     Guarda los datos de atribución del artículo original junto al reel:
       - {slug}_fuente.json  → metadatos completos en JSON
@@ -276,6 +277,15 @@ def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
     # Hashtag de la fuente (sin espacios ni caracteres especiales)
     import re as _re
     fuente_tag = _re.sub(r"[^a-zA-ZáéíóúÁÉÍÓÚñÑ]", "", fuente) if fuente else ""
+
+    # El texto publicado va SIEMPRE en español aunque la fuente sea inglesa:
+    # título = el del guion (ya en español); la descripción original solo si
+    # está en español, si no se usa el propio guion narrado.
+    from summarizer import _es_texto_en_espanol
+    if titulo_es:
+        titulo = titulo_es
+    if descripcion_art and not _es_texto_en_espanol(descripcion_art):
+        descripcion_art = guion_texto or ""
 
     lineas = [titulo, ""]
 
@@ -331,6 +341,45 @@ def _guardar_atribucion(slug: str, carpeta: str, noticia: dict,
     return fuente_completa
 
 
+def _ajustar_audio_a_duracion(ruta_audio: str, dur: float, duracion_maxima: int) -> float:
+    """Si la narración se pasa del máximo del short, la acelera un poco
+    (hasta un 15 %, que sigue sonando natural) en vez de cortar la última
+    frase a la mitad. Devuelve la duración resultante."""
+    import shutil
+    import subprocess
+    factor = min(1.15, dur / max(1.0, duracion_maxima - 0.5))
+    if factor <= 1.0 or not shutil.which("ffmpeg"):
+        return dur
+    tmp = ruta_audio + ".tempo.mp3"
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", ruta_audio,
+                        "-filter:a", f"atempo={factor:.3f}", tmp],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(tmp):
+        print(f"   [WARN] No se pudo acelerar el audio: {r.stderr.strip()[:200]}")
+        return dur
+    os.replace(tmp, ruta_audio)
+    nueva = duracion_audio(ruta_audio)
+    print(f"   Audio acelerado x{factor:.2f} para caber en {duracion_maxima}s: {nueva:.1f}s")
+    return nueva
+
+
+# Duración flexible (petición 2026-10-05): la duración de Ajustes es la base
+# (p. ej. 40 s) y, si la noticia da para más, el reel puede llegar al techo
+# (60 s). Nunca se rellena: con poco texto se queda en la base.
+REEL_DURACION_TECHO = int(os.environ.get("REEL_DURACION_TECHO", "60"))
+
+
+def duracion_segun_noticia(duracion_base: int, palabras_texto: int,
+                           techo: int = REEL_DURACION_TECHO) -> int:
+    if duracion_base >= techo:
+        return duracion_base
+    if palabras_texto >= 450:
+        return techo
+    if palabras_texto >= 250:
+        return max(duracion_base, (duracion_base + techo) // 2)
+    return duracion_base
+
+
 def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SALIDA,
                       duracion_maxima: int = 60, texto_articulo: str = None,
                       tipo: str = "articulo", imagenes: list = None,
@@ -379,17 +428,37 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
             texto_articulo = texto_completo
             print(f"   Artículo descargado: {len(texto_articulo.split())} palabras")
 
+    # Medio que bloquea la descarga (Reuters da 401) o enlace de Google News:
+    # buscar la misma historia en otro medio antes de escribir con solo el titular.
+    if not largo and tipo != "video" and len((texto_articulo or "").split()) < 150 and tiene_link_valido:
+        try:
+            from cobertura import texto_de_noticia
+            cob = texto_de_noticia(noticia)
+            if cob and len(cob["texto"].split()) > len((texto_articulo or "").split()):
+                print(f"   Texto de otro medio ({cob['medio']}): {len(cob['texto'].split())} palabras")
+                texto_articulo = cob["texto"]
+        except Exception as e:
+            print(f"   [WARN] Búsqueda en otros medios falló: {e}")
+
     if largo:
-        print("-> Generando guion LARGO (7-10 min)...")
+        # Vídeo entero: duracion_maxima llega en segundos (2-30 min); si viene
+        # el valor de un short (<=120 s) se usa el largo por defecto, 8 min.
+        minutos = min(30, max(2, duracion_maxima / 60)) if duracion_maxima > 120 else 8
+        print(f"-> Generando guion LARGO (~{minutos:.0f} min)...")
         from summarizer import generar_guion_largo
         guion = generar_guion_largo(
             noticia["titulo"], texto_articulo,
             noticia.get("fuente", ""),
-            duracion_min=max(7, duracion_maxima // 60) if duracion_maxima > 120 else 8,
+            duracion_min=minutos,
             documentacion=noticia.get("documentacion", ""),
         )
         duracion_maxima = guion["duracion_estimada_seg"] + 30  # margen
     else:
+        if tipo != "video":
+            flexible = duracion_segun_noticia(duracion_maxima, len((texto_articulo or "").split()))
+            if flexible != duracion_maxima:
+                print(f"-> Noticia con mucho contenido: reel de hasta {flexible}s (base {duracion_maxima}s)")
+                duracion_maxima = flexible
         print("-> Generando guion del reel...")
         if noticia.get("documentacion"):
             print(f"   {noticia['documentacion']}")
@@ -397,6 +466,7 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
             noticia["titulo"], texto_articulo,
             noticia.get("fuente", ""), tipo=tipo,
             documentacion=noticia.get("documentacion", ""),
+            duracion_seg=duracion_maxima,
         )
     print(f"   Guion ({guion['palabras']} palabras, ~{guion['duracion_estimada_seg']}s):")
     print(f"   {guion['guion']}")
@@ -427,6 +497,8 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
     ruta_audio = generar_audio(guion["guion"], ruta_audio, servicio=servicio_voz, voz=voz)
     dur = duracion_audio(ruta_audio)
     print(f"   Audio generado: {ruta_audio} ({dur:.1f}s)")
+    if not largo and dur > duracion_maxima:
+        dur = _ajustar_audio_a_duracion(ruta_audio, dur, duracion_maxima)
 
     # Pipeline de imágenes
     import tempfile
@@ -507,7 +579,8 @@ def procesar_noticia(noticia: dict, tema: str, carpeta_salida: str = CARPETA_SAL
             print(f"   Miniatura rápida generada: {ruta_thumb}")
 
     # Guardar atribución de la fuente original
-    _guardar_atribucion(slug, carpeta_salida, noticia, atribucion)
+    _guardar_atribucion(slug, carpeta_salida, noticia, atribucion,
+                        titulo_es=titulo_es, guion_texto=guion.get("guion", ""))
 
     # Limpiar imágenes temporales
     import shutil
@@ -1241,7 +1314,7 @@ def main():
                              "Tarda 3-6 min más por reel; sin esto, miniatura rápida.")
     parser.add_argument("--cantidad", type=int, default=1,
                         help="Cuantos items procesar (una por reel). Por defecto: 1.")
-    parser.add_argument("--duracion-maxima", type=int, default=60,
+    parser.add_argument("--duracion-maxima", type=int, default=30,
                         help="Duracion maxima del video en segundos. Por defecto: 60.")
     parser.add_argument("--largo", action="store_true",
                         help="Genera un video largo (7-10 min) con guion de 4 actos en vez de un Short.")

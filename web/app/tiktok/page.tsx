@@ -11,6 +11,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import AvisoServicios from "../components/AvisoServicios";
 
 interface Creator {
   creator_avatar_url?: string;
@@ -303,7 +304,8 @@ function TikTokPage() {
   const agree = disclose && branded ? t.agreeBranded : t.agreeMusic;
 
   return (
-    <div style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px 64px" }}>
+    <div className="page-wrap" style={{ paddingTop: 32, paddingBottom: 64 }}>
+      <AvisoServicios seccion="tiktok" />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>{t.title}</h1>

@@ -91,6 +91,40 @@ class PublicarTikTok(BaseModel):
     brand_content: bool = False   # "Contenido de marca" (colaboración pagada)
 
 
+def servicio_conectado() -> bool:
+    """True si el servicio responde, tiene la cuenta autorizada y hay API key."""
+    if not os.environ.get("TIKTOK_API_KEY"):
+        return False
+    try:
+        return bool(requests.get(f"{_service_url()}/", timeout=10).json().get("tiktokAuthorized"))
+    except Exception:
+        return False
+
+
+def publicar_video(path: Path, titulo: str, privacy_level: str = "SELF_ONLY") -> dict:
+    """Publicación sin interacción (piloto automático / Gestor) vía el servicio.
+    Comentarios, dúo y stitch desactivados; sin contenido de marca."""
+    if not os.environ.get("TIKTOK_API_KEY"):
+        raise RuntimeError("Falta TIKTOK_API_KEY (la PUBLISH_API_KEY del servicio en Coolify). "
+                           "Añádela en Canales → TikTok.")
+    if privacy_level not in PRIVACY_LEVELS:
+        privacy_level = "SELF_ONLY"
+    data = {
+        "title": (titulo or "")[:2200],
+        "privacyLevel": privacy_level,
+        "allowComment": "false", "allowDuet": "false", "allowStitch": "false",
+        "brandOrganicToggle": "false", "brandContentToggle": "false",
+    }
+    with Path(path).open("rb") as f:
+        r = requests.post(f"{_service_url()}/publish", headers={"X-API-Key": os.environ["TIKTOK_API_KEY"]},
+                          data=data, files={"video": (Path(path).name, f, "video/mp4")}, timeout=600)
+    if not r.ok:
+        raise RuntimeError(f"TikTok: {_error(r)}")
+    publish_id = r.json().get("publishId")
+    print(f"[TikTok] Publicado vía servicio: publish_id={publish_id}")
+    return {"publish_id": publish_id}
+
+
 @router.post("/api/tiktok/publicar")
 def publicar(req: PublicarTikTok):
     if req.privacy_level not in PRIVACY_LEVELS:

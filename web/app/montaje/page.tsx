@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import PublishModal from "../components/PublishModal";
+import AvisoServicios from "../components/AvisoServicios";
 
 const ESTILOS = [
   { id: "cinematico",  label: "Cinematico",  icon: "🎬", desc: "Dramático, iluminación oscura" },
@@ -297,8 +298,9 @@ export default function MontajePage() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-10">
-      <div className="max-w-4xl mx-auto">
+    <main className="min-h-screen py-10">
+      <div className="page-wrap">
+        <AvisoServicios seccion="montaje" />
 
         {publishing && (
           <PublishModal filename={publishing} onClose={() => setPublishing(null)} />

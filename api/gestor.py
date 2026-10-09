@@ -206,7 +206,14 @@ def _titulo_desde_guion(output_file: str) -> str | None:
 
 def _start_job(item: dict, items: list, overrides: dict = None) -> bool:
     """Crea un job de generación directamente en memoria. Devuelve True si se pudo lanzar."""
-    payload = _build_generate_payload(item, overrides=overrides)
+    try:
+        payload = _build_generate_payload(item, overrides=overrides)
+    except SinTextoDeNoticia as e:
+        # Mejor no hacer el reel que publicar uno con solo el titular (2026-10-05)
+        item["estado"] = "failed"
+        item["error"] = str(e)
+        print(f"[gestor] {e}")
+        return False
 
     # Enriquecer con contexto del hilo temático si aplica
     hilo_id = item.get("hilo_id")
@@ -315,6 +322,10 @@ def _sync_statuses(items: list) -> bool:
     return dirty
 
 
+class SinTextoDeNoticia(RuntimeError):
+    """No hay artículo con texto suficiente para escribir un guion de verdad."""
+
+
 def _build_generate_payload(item: dict, overrides: dict = None) -> dict:
     from api.prefs import load_prefs
     p = load_prefs()
@@ -361,7 +372,11 @@ def _build_generate_payload(item: dict, overrides: dict = None) -> dict:
     score = float(item.get("score_noticia") or 0)
     premium = score >= umbral and not base["largo"]
     base["video_ia"] = ov.get("video_ia", premium)
-    base["portada_ia"] = ov.get("portada_ia", premium)
+    # Portada IA en TODOS los reels (petición 2026-10-01: en Instagram la
+    # portada es lo que se ve en la cuadrícula del perfil). PORTADA_IA_SIEMPRE=0
+    # vuelve a reservarla a los premium. El vídeo IA sigue solo para premium.
+    siempre = os.environ.get("PORTADA_IA_SIEMPRE", "1").strip() != "0"
+    base["portada_ia"] = ov.get("portada_ia", True if siempre else premium)
 
     def _is_youtube(url: str) -> bool:
         return "youtube.com/watch" in url or "youtu.be/" in url
@@ -389,9 +404,23 @@ def _build_generate_payload(item: dict, overrides: dict = None) -> dict:
             if _is_youtube(link):
                 return {**base, "mode": "youtube", "url": link, "titulo": tit,
                         "modo_youtube": "clip", "cantidad_shorts": 1}
-            # Links de Google News RSS no son scrapeables — usar texto almacenado
+            # Google News: su "resumen" es solo un <a> con el titular. Antes se
+            # mandaba eso y salía la plantilla de emergencia (reels de 11 s).
+            # Ahora se busca el artículo real (o la misma historia en otro medio).
             if "news.google.com" in link:
-                return {**base, "mode": "texto", "texto": texto_fallback, "titulo": tit, "fuente": fuente}
+                from cobertura import texto_de_noticia
+                cob = texto_de_noticia(noticia)
+                if not cob:
+                    raise SinTextoDeNoticia(
+                        f"No se encontró el texto del artículo de «{tit}» (el medio bloquea "
+                        f"la descarga y no hay otro medio con la misma historia). No se genera "
+                        f"para no publicar un reel vacío.")
+                cabecera = (f"Titular original: {noticia.get('titulo_original')}\n"
+                            if noticia.get("titulo_original") else "")
+                if gancho:
+                    cabecera += f"Dato clave: {gancho}\n"
+                return {**base, "mode": "texto", "texto": f"{cabecera}\n{cob['texto']}",
+                        "titulo": tit, "fuente": fuente, "url_fuente": cob["url"]}
             return {**base, "mode": "url", "url": link, "titulo": tit, "fuente": fuente}
         return {**base, "mode": "texto", "texto": texto_fallback, "titulo": tit, "fuente": fuente}
     return {**base, "mode": "url", "url": contenido}
@@ -1366,3 +1395,23 @@ def manual_cleanup(dry_run: bool = False):
 
 
 threading.Thread(target=_scheduler_loop, daemon=True, name="gestor-scheduler").start()
+
+
+def _sync_loop():
+    """Avanza la cola sin depender de que alguien tenga el Gestor abierto:
+    antes los reels terminados solo pasaban a 'ready' (y a autopublicarse)
+    cuando la web pedía /api/gestor/items."""
+    while True:
+        time.sleep(20)
+        try:
+            with _lock:
+                items = _load(QUEUE_FILE)
+                dirty = _sync_statuses(items)
+                advanced = _advance_queue(items)
+                if dirty or advanced:
+                    _save(QUEUE_FILE, items)
+        except Exception as e:
+            print(f"[gestor] sync loop: {e}")
+
+
+threading.Thread(target=_sync_loop, daemon=True, name="gestor-sync").start()
