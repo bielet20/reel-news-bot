@@ -6,6 +6,7 @@ import ImagePicker, { type ImageConfig } from "./components/ImagePicker";
 import AvatarPicker, { type AvatarConfig } from "./components/AvatarPicker";
 import VoicePicker, { type VoiceConfig } from "./components/VoicePicker";
 import DiscoverPanel from "./components/DiscoverPanel";
+import YoutubePublicarButton from "./components/YoutubePublicarButton";
 
 type Mode = "url" | "texto" | "youtube" | "musica" | "tema" | "descubrir";
 
@@ -1139,11 +1140,16 @@ function JobPanel({
           {job.youtube_status === "ok" && job.youtube_url && (
             <a href={job.youtube_url} target="_blank" rel="noopener noreferrer"
               style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#4ade80", fontWeight: 600, textDecoration: "none" }}>
-              ✓ Publicado en YouTube →
+              ✓ Subido a YouTube →
               <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>
                 {job.youtube_url}
               </span>
             </a>
+          )}
+          {job.youtube_status === "ok" && job.youtube_url && (
+            <div style={{ marginTop: 8 }}>
+              <YoutubePublicarButton youtubeUrl={job.youtube_url} size="md" />
+            </div>
           )}
           {job.youtube_status === "error" && (
             <div style={{ fontSize: 12, color: "#f87171" }}>

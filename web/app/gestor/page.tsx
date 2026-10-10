@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import YoutubePublicarButton from "../components/YoutubePublicarButton";
 
 // ── Scanner types ──────────────────────────────────────────────────────────────
 
@@ -3371,6 +3372,7 @@ export default function GestorPage() {
                               ▶ YouTube
                             </a>
                           )}
+                          {item.youtube_url && <YoutubePublicarButton youtubeUrl={item.youtube_url} />}
                           {Object.entries(item.uploads || {}).filter(([p]) => p !== "youtube").map(([platform, info]) => {
                             const icons: Record<string, string> = { telegram: "✈ Telegram", x: "✕ X", instagram: "◈ Instagram", tiktok: "♪ TikTok", whatsapp: "● WhatsApp", facebook: "f Facebook", whatsapp_canal: "📢 Canal WA" };
                             const url = typeof info.url === "string" && info.url.startsWith("http") ? info.url : undefined;
