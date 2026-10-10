@@ -262,7 +262,9 @@ def subir_video(
             "defaultAudioLanguage": "es",
         },
         "status": {
-            "privacyStatus":            "public",
+            # Siempre privado: youtube_publicacion.py lo pasa a público
+            # 2h30m después, solo cuando YouTube haya terminado de procesarlo.
+            "privacyStatus":            "private",
             "selfDeclaredMadeForKids":  False,
         },
     }
@@ -290,7 +292,20 @@ def subir_video(
 
     video_id  = response["id"]
     video_url = f"https://www.youtube.com/watch?v={video_id}"
-    print(f"[YouTube] ¡Publicado! {video_url}")
+    print(f"[YouTube] Subido en PRIVADO: {video_url} (se publicará cuando esté procesado, mín. 2h30m)")
+
+    # Registrar para la publicación diferida (no debe romper la subida)
+    try:
+        from youtube_publicacion import registrar_subida
+        registrar_subida(
+            video_id=video_id,
+            titulo=titulo,
+            story_id=Path(video_path).stem,
+            video_path=str(video_path),
+        )
+    except Exception as e:
+        print(f"[YouTube][ERROR] Vídeo {video_id} subido en privado pero NO registrado "
+              f"para publicación diferida: {e}. Habrá que publicarlo a mano.")
 
     # Subir miniatura personalizada
     if thumbnail_path and __import__("os").path.isfile(thumbnail_path):

@@ -71,6 +71,7 @@ from api.autopublisher import router as autopublisher_router
 from api.tiktok_post import router as tiktok_post_router
 from api.fuentes_api import router as fuentes_router
 from api.distribucion import router as distribucion_router
+from api.youtube_publicacion_api import router as youtube_publicacion_router
 app.include_router(admin_router)
 app.include_router(credentials_router)
 app.include_router(hotspots_router)
@@ -91,6 +92,7 @@ app.include_router(autopublisher_router)
 app.include_router(tiktok_post_router)
 app.include_router(fuentes_router)
 app.include_router(distribucion_router)
+app.include_router(youtube_publicacion_router)
 
 app.add_middleware(
     CORSMiddleware,
